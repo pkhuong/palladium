@@ -1,0 +1,287 @@
+;;; Synthesise localised (with de bruijn indices) conditions for every
+;;; s:base in the skeleton type.
+;;;
+;;; We already have known conditions for values flowing in the
+;;; polymorphic function; we only have to AND them with any constraint
+;;; from the function's preconditions, and save the localised version.
+;;;
+;;; We have some known conditions for values flowing out of the
+;;; polymorphic function. We can use them directly.
+;;;
+;;; Otherwise, we must find the union of everything that could flow
+;;; there, and AND with any post-condition on that outflowing value.
+;;;
+;;; We do the latter with dataflow information from
+;;; `gather-skeleton-flow-info`. Given a positive s:base, we use
+;;; `base-sources` to find all the (negative) bases that may flow
+;;; there, and take the union of the set of values that may be bound
+;;; to these s:base.
+;;;
+;;; XXX: actually, monomorphise skeleton is a better name?
+(defpackage "MONOMORPHISE-SKELETON"
+  (:export "MONOMORPHISE")
+  (:use "CL")
+  (:local-nicknames ("C" "CONDITION")
+                    ("S" "SKELETON-TYPE")
+                    ("OUT" "MONO-TYPE")
+                    ("FLOW-INFO" "GATHER-SKELETON-FLOW-INFO")
+                    ("ARGUMENTS" "GATHER-ARGUMENT-CONDITIONS")
+                    ("CONTRACT" "GATHER-POLYMORPHIC-CONTRACT")))
+
+(in-package "MONOMORPHISE-SKELETON")
+
+(defun polarity-base-p (skel expected-polarity)
+  (check-type skel s:type)
+  (and (s:base-p skel)
+       (destructuring-bind (name actual-polarity flow)
+           (s:split skel)
+         (declare (ignore name flow))
+         (eql actual-polarity expected-polarity))))
+
+(defun positive-base-p (skel)
+  (polarity-base-p skel '+))
+
+(defun negative-base-p (skel)
+  (polarity-base-p skel '-))
+
+(defun binding-vector (skels)
+  (map 'simple-vector (lambda (skel)
+                        (and (s:base-p skel) skel))
+       skels))
+
+;;; Consruct a map from base name -> global condition for values
+;;; flowing in.
+(defun collect-argument-global-conditions (flow conditions contract)
+  (declare (type flow-info:info flow)
+           (type arguments:conditions conditions)
+           (type contract:contract contract))
+  (let ((global-conditions (ordered:map)))  ;; base name -> joined condition
+    (dolist (base (flow-info:all-bases flow) global-conditions)
+      ;; only do this for values flowing in.
+      (destructuring-bind (name polarity flow)
+          (s:split base)
+        (declare (ignore flow))
+        (when (eql polarity '-)
+          (let ((actual-condition (arguments:base-condition conditions base))
+                (precondition (contract:constraint contract base)))
+            (assert actual-condition)
+            (assert precondition)
+            (ordered:record global-conditions
+                            (cons name
+                                  (c:and-conditions (list actual-condition
+                                                          precondition))))))))))
+
+;;; Generate localised conditions for s:base. The global conditions
+;;; for -ve values (arguments, values flowing in) are in
+;;; *argument-global-conditions*.
+;;;
+;;; For positive values, we sometimes have a solution from the
+;;; contract. In that case, we take it.
+;;;
+;;; Otherwise, we intersect the binding's constraint from the
+;;; polymorphic contract with everything that could flow there.
+;;;
+;;; When we approximate everything that could flow somewhere, we must
+;;; be care to only directly refer to bindings in scope with negative
+;;; polarity: those are the bindings that are write-once in the
+;;; context of the return value.
+;;;
+;;; However, we are allowed (and want to) refer to everything when
+;;; localising conditions where they were defined. (XXX double check)
+
+(defvar *flow-info*)
+(declaim (type flow-info:info *flow-info*))
+
+(defvar *argument-global-conditions*)
+;;; base name -> globalised condition.
+(declaim (type ordered:map *argument-global-conditions*))
+
+(defun argument-global-condition (base)
+  (declare (type s:base base))
+  (destructuring-bind (name polarity flow)
+      (s:split base)
+    (declare (ignore flow))
+    (assert (eql polarity '-))
+    (let ((condition (ordered:find *argument-global-conditions* name)))
+      (assert condition)
+      condition)))
+
+(defvar *contract*)
+(declaim (type contract:contract *contract*))
+
+;;; The logic here is very similar to generate-condition-for-base in
+;;; `backfill-argument-conditions`: we're replacing bindings that aren't
+;;; in scope, or not safe to directly refer to, by existentials that
+;;; approximate the values that could go there.
+
+;;; Rewrite a condition to replace arguments in scope with existentials.
+(defun approximate-local-condition (condition)
+  (assert condition)
+  (let ((to-bind (ordered:map :test #'equalp)))
+    (flet ((rewrite (expression reference)
+             (cond ((and (typep reference '(cons (eql c:@-)))
+                         (negative-base-p expression))
+                    ;; Only safe to refer to negative polarity
+                    ;; arguments. negative polarity return values
+                    ;; could come from functions invoked repeatedly.
+                    reference)
+                   (t
+                    ;; make up a new binding that will be made to look like
+                    ;; something bound to this s:base.
+                    (or (ordered:find to-bind expression)
+                        (let ((fresh (c:fresh '#:a)))
+                          (ordered:record to-bind (cons expression fresh))
+                          fresh))))))
+      (wrap-existentials to-bind
+                         (scoping:to-local condition
+                                           #'s:base-p
+                                           #'rewrite
+                                           :test #'equalp)))))
+
+(defun wrap-existentials (to-bind condition)
+  (check-type to-bind ordered:map)
+  (let ((bindings '())
+        (conditions (list condition)))
+    (loop for (base . gensym) in (ordered:entries to-bind) do
+       ;; nothing prevents a negative value from directly
+       ;; referring to another negative value; perform type
+       ;; dispatch in approximate-local-condition-for-base.
+         (let ((condition (approximate-local-condition-for-base base)))
+           (push `(,gensym ,(flow-info:base-sort *flow-info* base)) bindings)
+           (push (if (c:mentions-v condition)
+                     `(let ((c:v ,gensym))
+                        ,condition)
+                     condition)
+                 conditions)))
+    (if bindings
+        `(c:exists ,(nreverse bindings)
+                   ,(c:and-conditions (nreverse conditions)))
+        condition)))
+
+(defun approximate-local-condition-for-argument (base)
+  (declare (type s:base base))
+  (assert (negative-base-p base))
+  (let ((location (scoping:reference base :test #'equalp)))
+    ;; it's always safe to directly refer to negative arguments in scope.
+    (when (typep location '(cons (eql c:@-)))
+      (return-from approximate-local-condition-for-argument
+        `(= c:v ,location))))
+  (occur-check:with-occur-check ((base) (return 'c:true))
+    ;; (over)approximate the set of values that may flow into the
+    ;; polymorphic function.
+    (approximate-local-condition (argument-global-condition base))))
+
+;; Come up with a localised approximation of the polymorphic
+;; function's postcondition on this positive type.
+;;
+;; If the postcondition is actually a solution, return that directly.
+;;
+;; The second return value is true iff the primary return value is a
+;; solution, not just an additional constraint.
+(defun approximate-constraint-for-result (base)
+  (declare (type s:base base))
+  (assert (positive-base-p base))
+  (let ((solution (contract:solution-or-nil *contract* base)))
+    (values (approximate-local-condition
+             (or solution
+                 (contract:constraint *contract* base)))
+            solution)))
+
+(defun approximate-local-condition-for-base (base)
+  (declare (type s:base base))
+  (cond ((negative-base-p base)
+         (approximate-local-condition-for-argument base))
+        (t
+         (assert (positive-base-p base))
+         (multiple-value-bind (constraint fully-solved)
+             (approximate-constraint-for-result base)
+           (if fully-solved
+               constraint
+               (c:and-conditions (list constraint
+                                       (approximate-local-condition-for-result base))))))))
+
+(defun approximate-local-condition-for-result (base)
+  (declare (type s:base base))
+  (assert (positive-base-p base))
+  (occur-check:with-occur-check ((base) (return 'c:true))
+    (c:or-conditions (mapcar #'approximate-local-condition-for-argument
+                             (flow-info:base-sources *flow-info* base)))))
+
+;;; The previous section was concerned with funny dataflow
+;;; business. Here, we just take conditions where they were defined
+;;; and re-localise them.
+(defun relocalise-condition-in-place (condition)
+  (assert condition)
+  (scoping:to-local condition
+                    #'s:base-p
+                    (lambda (expression reference)
+                      (assert reference (expression reference))
+                      reference)
+                    :test #'equalp))
+
+(defun check-all-local (condition)
+  "Errors out if the condition has any global reference left. Returns the condition as-is."
+  (scoping:to-local condition
+                    #'s:base-p
+                    (lambda (expression reference)
+                      (error "Unexpected global reference remaining ~S ~S."
+                             expression reference)
+                      expression)
+                    :test #'equalp)
+  condition)
+
+;;; Argument, or value flowing in the callee.
+(defun generate-condition-for-argument (base)
+  (assert (negative-base-p base))
+  (relocalise-condition-in-place (argument-global-condition base)))
+
+;;; Result, or value flowing out of the callee.
+(defun generate-condition-for-result (base)
+  (assert (positive-base-p base))
+  (let ((solution (contract:solution-or-nil *contract* base)))
+    (when solution
+      (return-from generate-condition-for-result
+        (relocalise-condition-in-place solution))))
+  (occur-check:with-occur-check-environment (#'equalp)
+    (check-all-local
+     (c:and-conditions (list (relocalise-condition-in-place
+                              (contract:constraint *contract* base))
+                             (approximate-local-condition-for-result base))))))
+
+(defun generate-condition (base)
+  (if (positive-base-p base)
+      (generate-condition-for-result base)
+      (generate-condition-for-argument base)))
+
+(defgeneric %monomorphise (skel)
+  (:documentation "Monomorphise a skeleton by generating local conditions for every s:base."))
+
+(defmethod %monomorphise ((skel s:function))
+  (destructuring-bind (skel-args skel-results)
+      (s:split skel)
+    (scoping:with-function-scope ((binding-vector skel-args))
+      (out:function (mapcar #'%monomorphise skel-args)
+                    (scoping:with-function-return-values ((binding-vector skel-results))
+                      (mapcar #'%monomorphise skel-results))))))
+
+(defmethod %monomorphise ((skel s:box))
+  (destructuring-bind (skel)
+      (s:split skel)
+    (out:box (%monomorphise skel))))
+
+(defmethod %monomorphise ((skel s:base))
+  (let ((sort (flow-info:base-sort *flow-info* skel))
+        (condition (generate-condition skel)))
+    (assert sort)
+    (assert condition)
+    (out:base sort condition)))
+
+(defun monomorphise (skeleton *flow-info* conditions *contract*)
+  (declare (type s:function skeleton)
+           (type flow-info:info *flow-info*)
+           (type arguments:conditions conditions)
+           (type contract:contract *contract*))
+  (let ((*argument-global-conditions*
+         (collect-argument-global-conditions *flow-info* conditions *contract*)))
+    (scoping:with-environment ()
+      (%monomorphise skeleton))))
