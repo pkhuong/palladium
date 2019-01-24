@@ -11,22 +11,32 @@
 
 (setf prove:*default-test-function* #'equalp)
 
-(plan 3)
+(plan 5)
 
 ;;; Driving example: derive dataflow for the composition (.) operator.
 (is (monomorphise:elaborate
+     ;; this polymorphic accepts a first function, from any number of
+     ;; values to any number of values (functions are tuple->tuple,
+     ;; not curried), and another function that may accept the first
+     ;; function's results and returns an arbitrary number of values.
+     ;;
+     ;; the result is a function that accepts what the first argument
+     ;; accepts, and returns what the second returns.
      (p:parse `(p:function ((p:function ((p:spread (a)))
                                         ((p:spread (b))))
                             (p:function ((p:spread (b)))
                                         ((p:spread (c)))))
                            ((p:function ((p:spread (a)))
                                         ((p:spread (c)))))))
+     ;; pass in `dec` for non-negative integers, and `inc` for
+     ;; arbitrary integers.
      (m:parse `((m:function ((m:base integer (>= v 0)))
                             ((m:base integer (= v (- (@- 0) 1)))))
                 (m:function ((m:base integer true))
                             ((m:base integer (= v (+ (@- 0) 1)))))))
+     ;; expect anything
      (p:parse `((p:spread (a)))))
-    ;; expectation:
+    ;; expected result:
     ;;    ({int a : v >= 0} -> {int : v = a - 1})
     ;; -> ({int a : v = x - 1, x >= 0} -> {int : v = a + 1}
     ;; -> ({int a : v >= 0} -> {int : v = x + 1, x = a - 1})
@@ -49,6 +59,107 @@
                                                       (and (= v (- f:a15 1))
                                                            (let ((v f:a15))
                                                              (= v (@- 0)))))))))))))))
+
+;; similar, but with a tighter precondition on `inc`, and an explicit
+;; precondition for the result.
+(is (monomorphise:elaborate
+     ;; this polymorphic accepts a first function, from any number of
+     ;; values to any number of values (functions are tuple->tuple,
+     ;; not curried), and another function that may accept the first
+     ;; function's results and returns an arbitrary number of values.
+     ;;
+     ;; the result is a function that accepts what the first argument
+     ;; accepts, and returns what the second returns.
+     (p:parse `(p:function ((p:function ((p:spread (a)))
+                                        ((p:spread (b))))
+                            (p:function ((p:spread (b)))
+                                        ((p:spread (c)))))
+                           ((p:function ((p:spread (a)))
+                                        ((p:spread (c)))))))
+     ;; pass in `dec` for non-negative integers, and `inc` for
+     ;; small integers.
+     (m:parse `((m:function ((m:base integer (>= v 0)))
+                            ((m:base integer (= v (- (@- 0) 1)))))
+                (m:function ((m:base integer (< v 1000)))
+                            ((m:base integer (= v (+ (@- 0) 1)))))))
+     ;; expect a function that accepts something in [0, 1000] and returns anything.
+     (p:parse `((p:function ((p:base (a) integer (and (>= v 0) (<= v 1000))))
+                            ((p:spread (b)))))))
+    ;; expected result:
+    ;;    ({int a : 0 <= v <= 1000} -> {int : v = a - 1})
+    ;; -> ({int a : v = x - 1, 0 <= x <= 1000} -> {int : v = a + 1}
+    ;; -> ({int a : 0 <= v <= 1000} -> {int : v = x + 1, x = a - 1})
+    (m:parse `(m:function
+               ((m:function ((m:base integer (and (>= v 0) (<= v 1000))))
+                            ((m:base integer (= v (- (@- 0) 1)))))
+                (m:function ((m:base integer (exists ((f:a13 integer))
+                                                     (and (= v (- f:a13 1))
+                                                          (let ((v f:a13))
+                                                            (and (>= v 0)
+                                                                 (<= v 1000)))))))
+                            ((m:base integer (= v (+ (@- 0) 1))))))
+               ((m:function ((m:base integer (and (>= v 0) (<= v 1000))))
+                            ((m:base integer (exists
+                                              ((f:a14 integer))
+                                              (and (= v (+ f:a14 1))
+                                                   (let ((v f:a14))
+                                                     (exists
+                                                      ((f:a15 integer))
+                                                      (and (= v (- f:a15 1))
+                                                           (let ((v f:a15))
+                                                             (= v (@- 0)))))))))))))))
+
+;; same compose inc / dec example, but this time without an explicit
+;; precondition on the returned function. This will yield something
+;; that will not typecheck.
+(is (monomorphise:elaborate
+     ;; this polymorphic accepts a first function, from any number of
+     ;; values to any number of values (functions are tuple->tuple,
+     ;; not curried), and another function that may accept the first
+     ;; function's results and returns an arbitrary number of values.
+     ;;
+     ;; the result is a function that accepts what the first argument
+     ;; accepts, and returns what the second returns.
+     (p:parse `(p:function ((p:function ((p:spread (a)))
+                                        ((p:spread (b))))
+                            (p:function ((p:spread (b)))
+                                        ((p:spread (c)))))
+                           ((p:function ((p:spread (a)))
+                                        ((p:spread (c)))))))
+     ;; pass in `dec` for non-negative integers, and `inc` for
+     ;; small integers.
+     (m:parse `((m:function ((m:base integer (>= v 0)))
+                            ((m:base integer (= v (- (@- 0) 1)))))
+                (m:function ((m:base integer (< v 1000)))
+                            ((m:base integer (= v (+ (@- 0) 1)))))))
+     ;; expect a function from anything to anything.
+     (p:parse `((p:function ((p:spread (a)))
+                            ((p:spread (b)))))))
+    ;; expected result:
+    ;;    ({int a : 0 <= v} -> {int : v = a - 1})
+    ;; -> ({int a : v = x - 1, 0 <= x } -> {int : v = a + 1}
+    ;; -> ({int a : 0 <= v} -> {int : v = x + 1, x = a - 1})
+    ;;
+    ;; While the first argument is satisfied by `dec`, the second
+    ;; has too lax an argument type for `inc`.
+    (m:parse `(m:function
+               ((m:function ((m:base integer (>= v 0)))
+                            ((m:base integer (= v (- (@- 0) 1)))))
+                (m:function ((m:base integer
+                                     (exists ((f:a14 integer))
+                                             (and (= v (- f:a14 1))
+                                                  (let ((v f:a14))
+                                                    (>= v 0))))))
+                            ((m:base integer (= v (+ (@- 0) 1))))))
+               ((m:function ((m:base integer (>= v 0)))
+                            ((m:base integer
+                                     (exists ((f:a15 integer))
+                                             (and (= v (+ f:a15 1))
+                                                  (let ((v f:a15))
+                                                    (exists ((f:a16 integer))
+                                                            (and (= v (- f:a16 1))
+                                                                 (let ((v f:a16))
+                                                                   (= v (@- 0)))))))))))))))
 
 ;;; Check that we preserve relational postconditions and correctly
 ;;; parse relations in the expected result type.
