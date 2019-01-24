@@ -1,0 +1,155 @@
+(in-package "CL-USER")
+(require 'sb-cover)
+
+(in-package "SB-COVER")
+(defvar *current-package*)
+
+(defun report-file (file html-stream external-format)
+  "Print a code coverage report of FILE into the stream HTML-STREAM."
+  (format html-stream "<html><head>")
+  (write-styles html-stream)
+  (format html-stream "</head><body>")
+  (let* ((source (detabify (read-file file external-format)))
+         (states (make-array (length source)
+                             :initial-element 0
+                             :element-type '(unsigned-byte 4)))
+         (hashtable (code-coverage-hashtable))
+         ;; Convert the code coverage records to a more suitable format
+         ;; for this function.
+         (expr-records (convert-records (gethash file hashtable) :expression))
+         (branch-records (convert-records (gethash file hashtable) :branch))
+         ;; Cache the source-maps
+         (maps (with-input-from-string (stream source)
+                 (loop with *current-package* = "CL-USER"
+                       with map = nil
+                       with form = nil
+                       with eof = nil
+                       for i from 0
+                       do (setf (values form map)
+                                (handler-case
+                                    (read-and-record-source-map stream)
+                                  (end-of-file ()
+                                    (setf eof t))
+                                  (error (error)
+                                    (warn "Error when recording source map for toplevel form ~A:~%  ~A" i error)
+                                    (values nil
+                                            (make-hash-table)))))
+                       until eof
+                       when map
+                       collect (cons form map)))))
+    (mapcar (lambda (map)
+              (maphash (lambda (k locations)
+                         (declare (ignore k))
+                         (dolist (location locations)
+                           (destructuring-bind (start end suppress) location
+                             (when suppress
+                               (fill-with-state source states 15 (1- start)
+                                                end)))))
+                       (cdr map)))
+            maps)
+    ;; Go through all records, find the matching source in the file,
+    ;; and update STATES to contain the state of the record in the
+    ;; indexes matching the source location. We do this in two stages:
+    ;; the first stage records the character ranges, and the second stage
+    ;; does the update, in order from shortest to longest ranges. This
+    ;; ensures that for each index in STATES will reflect the state of
+    ;; the innermost containing form.
+    (let ((counts (list :branch (make-instance 'sample-count :mode :branch)
+                        :expression (make-instance 'sample-count
+                                                   :mode :expression))))
+      (let ((records (append branch-records expr-records))
+            (locations nil))
+        (dolist (record records)
+          (destructuring-bind (mode path state) record
+            (let* ((path (reverse path))
+                   (tlf (car path))
+                   (source-form (car (nth tlf maps)))
+                   (source-map (cdr (nth tlf maps)))
+                   (source-path (cdr path)))
+              (cond ((eql mode :branch)
+                     (let ((count (getf counts :branch)))
+                       ;; For branches mode each record accounts for two paths
+                       (incf (ok-of count)
+                             (ecase state
+                               (5 2)
+                               ((6 9) 1)
+                               (10 0)))
+                       (incf (all-of count) 2)))
+                    (t
+                     (let ((count (getf counts :expression)))
+                       (when (eql state 1)
+                         (incf (ok-of count)))
+                       (incf (all-of count)))))
+              (if source-map
+                  (handler-case
+                      (multiple-value-bind (start end)
+                          (source-path-source-position (cons 0 source-path)
+                                                       source-form
+                                                       source-map)
+                        (push (list start end source state) locations))
+                    (error ()
+                      (warn "Error finding source location for source path ~A in file ~A~%" source-path file)))
+                  (warn "Unable to find a source map for toplevel form ~A in file ~A~%" tlf file)))))
+        ;; Now process the locations, from the shortest range to the longest
+        ;; one. If two locations have the same range, the one with the higher
+        ;; state takes precedence. The latter condition ensures that if
+        ;; there are both normal- and a branch-states for the same form,
+        ;; the branch-state will be used.
+        (setf locations (sort locations #'> :key #'fourth))
+        (dolist (location (stable-sort locations #'<
+                                       :key (lambda (location)
+                                              (- (second location)
+                                                 (first location)))))
+          (destructuring-bind (start end source state) location
+            (fill-with-state source states state start end))))
+      (print-report html-stream file counts states source)
+      (format html-stream "</body></html>")
+      (list (getf counts :expression)
+            (getf counts :branch)))))
+
+;; stolen from swank's source-path-parser.lisp
+(defun starts-with-p (string prefix)
+  (declare (type string string prefix))
+  (not (mismatch string prefix
+		 :end1 (min (length string) (length prefix))
+		 :test #'char-equal)))
+
+(defun extract-package (line)
+  (declare (type string line))
+  (let ((*package* (find-package *current-package*)))
+    (second (read-from-string line))))
+
+(defun look-for-in-package-form (string)
+  (when (or (starts-with-p string "(in-package ")
+            (starts-with-p string "(cl:in-package "))
+    (let ((name (extract-package string)))
+      (when (find-package name)
+        (setf *current-package* name)))))
+
+(defun read-and-record-source-map (stream)
+  "Read the next object from STREAM.
+Return the object together with a hashtable that maps
+subexpressions of the object to stream positions."
+  (let* ((source-map (make-hash-table :test #'eq))
+         (start (file-position stream))
+         (form (let ((*package* (find-package *current-package*))
+                     (*readtable* (make-source-recording-readtable *readtable* source-map)))
+                 (read stream)))
+         (end (file-position stream)))
+    (assert (file-position stream start))
+    (loop until (>= (file-position stream) end)
+       do (look-for-in-package-form (read-line stream))
+       finally (assert (file-position stream end)))
+    ;; ensure that at least FORM is in the source-map
+    (unless (gethash form source-map)
+      (push (list start end nil)
+            (gethash form source-map)))
+    (values form source-map)))
+
+(in-package "CL-USER")
+(declaim (optimize sb-cover:store-coverage-data))
+(asdf:oos 'asdf:load-op "palladium" :force t)
+(require 'prove)
+(prove:run '#:palladium.test)
+
+(sb-cover:report "/home/pkhuong/Desktop/cover/")
