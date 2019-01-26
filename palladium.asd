@@ -17,6 +17,9 @@
                ;; Tracks virtual values in scope and their de bruijn indices,
                ;; and maps between local expressions and globalised ones.
                (:file "scoping" :depends-on ("condition"))
+               ;; Tracks causally available skeleton:base types in the
+               ;; current scope.
+               (:file "causality")
                ;; monomorphic types
                (:file "mono" :depends-on ("condition"))
                ;; function call patterns
