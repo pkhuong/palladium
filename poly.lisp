@@ -72,6 +72,10 @@
              (:constructor base (flow sort condition)))
   ;; list of equivalence classes where this type flows into and out
   ;; of, depending on polarity.
+  ;;
+  ;; this list must not be empty. If a fully specified type doesn't
+  ;; need to participate in the dataflow, it makes sense to specify a
+  ;; unique flow variable.
   (flow nil :type (and cons (satisfies list-of-symbol)) :read-only t)
   ;; * is a special symbol that stands for nothing in
   (sort '* :type symbol :read-only t)
