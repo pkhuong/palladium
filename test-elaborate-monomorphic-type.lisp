@@ -11,7 +11,7 @@
 
 (setf prove:*default-test-function* #'equalp)
 
-(plan 9)
+(plan 12)
 
 ;;; Driving example: derive dataflow for the composition (.) operator.
 (is (monomorphise:elaborate
@@ -414,4 +414,35 @@
                                                    (and (>= v -1) (>= v 0)))))
                                     (= v (@- 1))))))))
 
+;; trivial case: a function that accepts any integer and returns 0.
+;; this should always return 0.
+(is (monomorphise:elaborate
+     (p:parse `(p:function ((p:base (a) integer true))
+                           ((p:base (b) integer (= v 0)))))
+     (m:parse `((m:base integer (>= v 0))))
+     (p:parse `((p:spread (a)))))
+    (m:parse `(m:function ((m:base integer (>= v 0)))
+                          ((m:base integer (= v 0))))))
+
+;; less trivial case: we now also know that the argument could flow to
+;; the result.
+(is (monomorphise:elaborate
+     (p:parse `(p:function ((p:base (a) integer true))
+                           ((p:base (a) integer (= v 0)))))
+     (m:parse `((m:base integer (>= v 0))))
+     (p:parse `((p:spread (a)))))
+    (m:parse `(m:function ((m:base integer (>= v 0)))
+                          ((m:base integer (or (= v 0) (= v (@- 0))))))))
+
+;; same thing, but this function is another function's return value!
+(is (monomorphise:elaborate
+     (p:parse `(p:function ()
+                           ((p:function ((p:base (a) integer true))
+                                        ((p:base (a) integer (= v 0)))))))
+     (m:parse `())
+     (p:parse `((p:function ((p:base (a) integer (>= v 0)))
+                            ((p:spread (b)))))))
+    (m:parse `(m:function ()
+                          ((m:function ((m:base integer (>= v 0)))
+                                       ((m:base integer (or (= v 0) (= v (@- 0))))))))))
 (finalize)

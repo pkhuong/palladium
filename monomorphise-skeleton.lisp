@@ -264,36 +264,41 @@
       (s:split base)
     (declare (ignore name flow))
     (assert (eql polarity '+))
-    (let ((solution (contract:solution-or-nil *contract* base)))
-      (when solution
-        (return-from generate-condition-for-result
-          (relocalise-condition-in-place solution))))
-    (occur-check:with-occur-check-environment (#'equalp)
-      ;; we know we're describing values flowing out of the
-      ;; polymorphic function. if these values flow out as a result,
-      ;; and the function is pure, what's currently in scope describes
-      ;; everything available to compute them. otherwise, the best we
-      ;; can do is obey dataflow annotations.
-      ;;
-      ;; of course, that doesn't hold when computing a direct return
-      ;; value for the toplevel function. In that case, we can always
-      ;; assume causality, since any side effect happens after the
-      ;; value has been generated.
-      ;;
-      ;; n.b., it's always safe to not assume causality: it only means
-      ;; we are more conservative when determining all the ways we
-      ;; could generate values of a given type.
-      (let ((*assume-causality* (and (eql position :res)
-                                     (or *assume-purity*
-                                         (not
-                                          (null
-                                           (scoping:reference base
-                                                              :test #'equalp
-                                                              :toplevel-only t)))))))
-        (check-all-local
-         (c:and-conditions (list (relocalise-condition-in-place
-                                  (contract:constraint *contract* base))
-                                 (approximate-local-condition-for-result base))))))))
+    ;; if we have a fully specified solution, we know hat the
+    ;; polymorphic function knows how to generate these values from
+    ;; scratch and push them there. the spec also tells us what
+    ;; polymorphic types might also flow there; OR both in.
+    (let ((solution (or (contract:solution-or-nil *contract* base)
+                        'c:false))
+          (dataflow-type
+           (occur-check:with-occur-check-environment (#'equalp)
+             ;; we know we're describing values flowing out of the
+             ;; polymorphic function. if these values flow out as a result,
+             ;; and the function is pure, what's currently in scope describes
+             ;; everything available to compute them. otherwise, the best we
+             ;; can do is obey dataflow annotations.
+             ;;
+             ;; of course, that doesn't hold when computing a direct return
+             ;; value for the toplevel function. In that case, we can always
+             ;; assume causality, since any side effect happens after the
+             ;; value has been generated.
+             ;;
+             ;; n.b., it's always safe to not assume causality: it only means
+             ;; we are more conservative when determining all the ways we
+             ;; could generate values of a given type.
+             (let ((*assume-causality* (and (eql position :res)
+                                            (or *assume-purity*
+                                                (not
+                                                 (null
+                                                  (scoping:reference base
+                                                                     :test #'equalp
+                                                                     :toplevel-only t)))))))
+               (check-all-local
+                (c:and-conditions (list (relocalise-condition-in-place
+                                         (contract:constraint *contract* base))
+                                        (approximate-local-condition-for-result base))))))))
+      (c:or-conditions (list (relocalise-condition-in-place solution)
+                             dataflow-type)))))
 
 (defun generate-condition (base)
   (if (positive-base-p base)

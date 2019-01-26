@@ -28,7 +28,9 @@
 ;;; Public interface.
 (defstruct contract
   ;; for positive s:base only, map from base name to globalised
-  ;; mandatory return type, if any.
+  ;; mandatory return type, if any. the polymorphic function knows how
+  ;; to generate that kind of values; if there are dataflow
+  ;; annotations, it could do even more.
   (solutions (ordered:map) :type ordered:map :read-only t)
   ;; for any s:base, map from base name to globalised constraint that
   ;; should be ANDed in.
