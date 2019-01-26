@@ -24,15 +24,13 @@
   (assert (every #'mono:type-p mono-arguments))
   (check-type result-pattern list)
   (assert (every #'pattern:type-p result-pattern))
-  (labels ((fail (message &rest arguments)
-             (apply 'format *error-output* message arguments)
-             (return-from elaborate nil))
-           (check (value type message &rest arguments)
-             (cond (value
-                    (assert (typep value type))
-                    value)
-                   (t
-                    (apply #'fail message arguments)))))
+  (flet ((check (value type message &rest arguments)
+           (cond (value
+                  (assert (typep value type))
+                  value)
+                 (t
+                  (apply 'format *error-output* message arguments)
+                  (return-from elaborate nil)))))
     (let*
         ((condition:*counter* 0)
          (poly-function

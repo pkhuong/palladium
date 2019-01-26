@@ -61,12 +61,6 @@
   (destructuring-bind (contents) arguments
     (box (parse contents))))
 
-(defun %ensure-flow-empty-iff-sort-specified (flow sort)
-  (if (eql sort '*)
-      (assert flow)
-      (assert (null flow)))
-  flow)
-
 (defstruct (base
              (:include type)
              (:constructor base (flow sort condition)))

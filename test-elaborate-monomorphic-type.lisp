@@ -69,9 +69,12 @@
                                         ((p:spread (b)))))
                            ((p:function ((p:spread (a)))
                                         ((p:spread (b)))))))
-     ;; pass in an identify function
+     ;; pass in an identify function... and refer to the argument with
+     ;; negative notation for fun.
+     ;;
+     ;; XXX: test this feature unit by unit as well.
      (m:parse `((m:function ((m:base integer (>= v 0)))
-                            ((m:base integer (= v (@- 0)))))))
+                            ((m:base integer (= v (@- -1)))))))
      ;; expect anything
      (p:parse `((p:spread (a))))
      :assume-purity nil)
