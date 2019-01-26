@@ -84,12 +84,15 @@
         (throw fail-tag "Index out of bounds"))
       (aref vector index))))
 
-(defun reference (object &key (test 'eql) (key 'identity))
+(defun reference (object &key (test 'eql) (key 'identity) toplevel-only)
   (let ((entry (cdr (assoc object *reverse-mapping*
                            :test test
                            :key key))))
     (and entry
          (destructuring-bind (operator index depth) entry
+           (when (and toplevel-only
+                      (plusp depth))
+             (return-from reference nil))
            (let ((relative-depth (- (length *environment*) 1 depth)))
              (assert (>= relative-depth 0))
              (if (zerop relative-depth)
