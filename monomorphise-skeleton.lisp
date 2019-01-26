@@ -114,6 +114,16 @@
 (defvar *assume-causality*)
 (declaim (type boolean *assume-causality*))
 
+;;; if *assume-purity*, we're generating the type for a pure function.
+;;; otherwise, assume that any function returned by the initial call
+;;; may mutate shared state, and thus communicate across time and
+;;; function bodies.
+;;;
+;;; In the impure/conservative case, we can only directly refer to
+;;; toplevel bindings.
+(defvar *assume-purity*)
+(declaim (type boolean *assume-purity*))
+
 ;;; The logic here is very similar to generate-condition-for-base in
 ;;; `backfill-argument-conditions`: we're replacing bindings that aren't
 ;;; in scope, or not safe to directly refer to, by existentials that
@@ -166,7 +176,10 @@
 (defun approximate-local-condition-for-argument (base)
   (declare (type s:base base))
   (assert (negative-base-p base))
-  (let ((location (scoping:reference base :test #'equalp)))
+  (let ((location (scoping:reference base :test #'equalp
+                                     ;; only safe to use non-toplevel bindings
+                                     ;; in pure functions.
+                                     :toplevel-only (not *assume-purity*))))
     ;; it's always safe to directly refer to negative arguments in scope.
     (when (typep location '(cons (eql c:@-)))
       (return-from approximate-local-condition-for-argument
@@ -258,15 +271,25 @@
     (occur-check:with-occur-check-environment (#'equalp)
       ;; we know we're describing values flowing out of the
       ;; polymorphic function. if these values flow out as a result,
-      ;; what's currently in scope describes everything available to
-      ;; compute them. otherwise, we're computing the arguments we
-      ;; might pass to a function we received as argument, and the
-      ;; best we can do is obey dataflow annotations.
+      ;; and the function is pure, what's currently in scope describes
+      ;; everything available to compute them. otherwise, the best we
+      ;; can do is obey dataflow annotations.
+      ;;
+      ;; of course, that doesn't hold when computing a direct return
+      ;; value for the toplevel function. In that case, we can always
+      ;; assume causality, since any side effect happens after the
+      ;; value has been generated.
       ;;
       ;; n.b., it's always safe to not assume causality: it only means
       ;; we are more conservative when determining all the ways we
       ;; could generate values of a given type.
-      (let ((*assume-causality* (eql position :res)))
+      (let ((*assume-causality* (and (eql position :res)
+                                     (or *assume-purity*
+                                         (not
+                                          (null
+                                           (scoping:reference base
+                                                              :test #'equalp
+                                                              :toplevel-only t)))))))
         (check-all-local
          (c:and-conditions (list (relocalise-condition-in-place
                                   (contract:constraint *contract* base))
@@ -301,13 +324,15 @@
     (assert condition)
     (out:base sort condition)))
 
-(defun monomorphise (skeleton *flow-info* conditions *contract*)
+(defun monomorphise (skeleton *flow-info* conditions *contract*
+                     &key (assume-purity t))
   (declare (type s:function skeleton)
            (type flow-info:info *flow-info*)
            (type arguments:conditions conditions)
            (type contract:contract *contract*))
   (let ((*argument-global-conditions*
-         (collect-argument-global-conditions *flow-info* conditions *contract*)))
+         (collect-argument-global-conditions *flow-info* conditions *contract*))
+        (*assume-purity* (not (not assume-purity))))
     (scoping:with-environment ()
       (causality:with-causality-tracking ()
         (%monomorphise skeleton)))))

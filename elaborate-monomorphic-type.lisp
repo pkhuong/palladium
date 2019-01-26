@@ -17,7 +17,8 @@
   (and (listp x)
        (every #'poly-type:type-p x)))
 
-(defun elaborate (function-pattern mono-arguments result-pattern)
+(defun elaborate (function-pattern mono-arguments result-pattern
+                  &key (assume-purity t))
   (check-type function-pattern pattern:function)
   (check-type mono-arguments list)
   (assert (every #'mono:type-p mono-arguments))
@@ -89,7 +90,8 @@
       (check (monomorphise-skeleton:monomorphise skel-function
                                                  flow-info
                                                  argument-conditions
-                                                 function-contract)
+                                                 function-contract
+                                                 :assume-purity assume-purity)
              'mono:function
              "Failed to monomorphise skeleton ~S with flow info ~S, ~
               argument conditions ~S, and contract ~S."

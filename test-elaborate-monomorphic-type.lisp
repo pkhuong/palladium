@@ -11,7 +11,7 @@
 
 (setf prove:*default-test-function* #'equalp)
 
-(plan 6)
+(plan 9)
 
 ;;; Driving example: derive dataflow for the composition (.) operator.
 (is (monomorphise:elaborate
@@ -60,9 +60,74 @@
                                                            (let ((v f:a15))
                                                              (= v (@- 0)))))))))))))))
 
-;;; Given the assumption of purity, causality and scoping match, so we
-;;; can even be tighter when multiple sources of `a` are available,
-;;; but in independent scopes.
+;;; we have to be more conservative if the function may be impure.
+(is (monomorphise:elaborate
+     ;; accept a function from a to b, and return a function from a to b.
+     ;; without purity, we can't assume we know this is the identify.
+     ;; the returnee could, e.g,, be a caching wrapper of the argument.
+     (p:parse `(p:function ((p:function ((p:spread (a)))
+                                        ((p:spread (b)))))
+                           ((p:function ((p:spread (a)))
+                                        ((p:spread (b)))))))
+     ;; pass in an identify function
+     (m:parse `((m:function ((m:base integer (>= v 0)))
+                            ((m:base integer (= v (@- 0)))))))
+     ;; expect anything
+     (p:parse `((p:spread (a))))
+     :assume-purity nil)
+    ;; expected result:
+    ;;    ({int a : v >= 0} -> {int : v = a})
+    ;; -> ({int a : v >= 0} -> {int : v >= 0 })
+    (m:parse `(m:function
+               ((m:function ((m:base integer (>= v 0)))
+                            ((m:base integer (= v (@- 0))))))
+               ((m:function ((m:base integer (>= v 0)))
+                            ((m:base integer (exists ((f:a9 integer))
+                                                     (and (= v f:a9)
+                                                          (let ((v f:a9))
+                                                            (>= v 0)))))))))))
+
+;;; we can still do some useful things, even if there may be side effects.
+(is (monomorphise:elaborate
+     ;; accept an `a`, and a function from a to b, return a b and a
+     ;; function from a to be.
+     ;;
+     ;; the returned function may not be the same as the second
+     ;; argument, but we know exactly where the first argument comes
+     ;; from, purity or no.
+     (p:parse `(p:function ((p:spread (a))
+                            (p:function ((p:spread (a)))
+                                        ((p:spread (b)))))
+                           ((p:spread (b))
+                            (p:function ((p:spread (a)))
+                                        ((p:spread (b)))))))
+     (m:parse `((m:base integer (= v 42))
+                (m:function ((m:base integer (>= v 0)))
+                            ((m:base integer (= v (@- 0)))))))
+     ;; expect anything
+     (p:parse `((p:spread (a))))
+     :assume-purity nil)
+    ;; expected result:
+    ;;    {int a : v >= 0} -> ({int b : v >= 0} -> {int : v = b})
+    ;; -> a, ({int c : v >= 0} -> {int : v >= 0 })
+    (m:parse `(m:function
+               ((m:base integer (= v 42))
+                (m:function ((m:base integer (or (= v (@- 0 1)) (>= v 0))))
+                            ((m:base integer (= v (@- 0))))))
+               ((m:base integer (exists ((f:a12 integer))
+                                        (and (= v f:a12)
+                                             (let ((v f:a12))
+                                               (= v (@- 0))))))
+                (m:function ((m:base integer (>= v 0)))
+                            ((m:base integer (exists ((f:a13 integer))
+                                                     (and (= v f:a13)
+                                                          (let ((v f:a13))
+                                                            (or (= v (@- 0 1))
+                                                                (>= v 0))))))))))))
+
+;;; Given the assumption of purity, we can assume causality and
+;;; scoping match, so we can even be tighter when multiple sources of
+;;; `a` are available, but in independent scopes.
 (is (monomorphise:elaborate
      ;; this polymorphic accepts a first function, from any number of
      ;; values to any number of values (functions are tuple->tuple,
@@ -120,6 +185,52 @@
                                                       ((f:a20 integer))
                                                       (and (= v (- f:a20 1))
                                                            (let ((v f:a20))
+                                                             (= v (@- 0)))))))))))))))
+
+(is (monomorphise:elaborate
+     ;; this polymorphic accepts a first function, from any number of
+     ;; values to any number of values (functions are tuple->tuple,
+     ;; not curried), and another function that may accept the first
+     ;; function's results and returns an arbitrary number of values.
+     ;;
+     ;; the result is a function that accepts what the first argument
+     ;; accepts, and returns what the second returns.
+     (p:parse `(p:function ((p:function ((p:spread (a)))
+                                        ((p:spread (b))))
+                            (p:function ((p:spread (b)))
+                                        ((p:spread (c)))))
+                           ((p:function ((p:spread (a)))
+                                        ((p:spread (c)))))))
+     ;; pass in `dec` for non-negative integers, and `inc` for
+     ;; arbitrary integers.
+     (m:parse `((m:function ((m:base integer (>= v 0)))
+                            ((m:base integer (= v (- (@- 0) 1)))))
+                (m:function ((m:base integer true))
+                            ((m:base integer (= v (+ (@- 0) 1)))))))
+     ;; expect anything
+     (p:parse `((p:spread (a)))))
+    ;; expected result:
+    ;;    ({int a : v >= 0} -> {int : v = a - 1})
+    ;; -> ({int a : v = x - 1, x >= 0} -> {int : v = a + 1}
+    ;; -> ({int a : v >= 0} -> {int : v = x + 1, x = a - 1})
+    (m:parse `(m:function
+               ((m:function ((m:base integer (>= v 0)))
+                            ((m:base integer (= v (- (@- 0) 1)))))
+                (m:function ((m:base integer (exists
+                                              ((f:a13 integer))
+                                              (and (= v (- f:a13 1))
+                                                   (let ((v f:a13))
+                                                     (>= v 0))))))
+                            ((m:base integer (= v (+ (@- 0) 1))))))
+               ((m:function ((m:base integer (>= v 0)))
+                            ((m:base integer (exists
+                                              ((f:a14 integer))
+                                              (and (= v (+ f:a14 1))
+                                                   (let ((v f:a14))
+                                                     (exists
+                                                      ((f:a15 integer))
+                                                      (and (= v (- f:a15 1))
+                                                           (let ((v f:a15))
                                                              (= v (@- 0)))))))))))))))
 
 ;; similar, but with a tighter precondition on `inc`, and an explicit
