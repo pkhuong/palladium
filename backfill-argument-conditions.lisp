@@ -24,17 +24,16 @@
       (s:split base)
     (declare (ignore name flow position))
     (and (eql polarity '-)
-         (not (conditions:base-condition *conditions* base)))
-    ))
+         (not (conditions:base-condition *conditions* base)))))
 
 (defun generate-condition-for-base (base)
   (check-type base s:base)
   (with-occur-check ((base) (return 'c:true))
     (let* ((condition
             (or (conditions:base-condition *conditions* base)
-                (progn
-                  (assert (conditions:base-condition *conditions* base))
-                  (return 'c:true))))
+                ;; this case only happens when a dataflow variable
+                ;; does not interact with any argument.
+                (return 'c:true)))
            (to-bind (ordered:map :test #'equalp))
            (rewritten
             (scoping:to-local
