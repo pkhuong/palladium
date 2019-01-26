@@ -11,7 +11,7 @@
 
 (setf prove:*default-test-function* #'equalp)
 
-(plan 12)
+(plan 13)
 
 ;;; Driving example: derive dataflow for the composition (.) operator.
 (is (monomorphise:elaborate
@@ -448,4 +448,31 @@
     (m:parse `(m:function ()
                           ((m:function ((m:base integer (>= v 0)))
                                        ((m:base integer (or (= v 0) (= v (@- 0))))))))))
+
+;; confirm that we handle polymorphic swap correctly.
+(is (monomorphise:elaborate
+     (p:parse `(p:function ((p:var (a))
+                            (p:var (b)))
+                           ((p:var (b))
+                            (p:var (a)))))
+     (m:parse `((m:function ((m:base integer true))
+                            ((m:base integer (= v (+ (@- 0) 1)))))
+                (m:function ((m:base integer (>= v 0)))
+                            ((m:base integer (= v (- (@- 0) 1)))))))
+     (p:parse `((p:spread (a)))))
+    (m:parse `(m:function ((m:function ((m:base integer true))
+                                       ((m:base integer (= v (+ (@- 0) 1)))))
+                           (m:function ((m:base integer (>= v 0)))
+                                       ((m:base integer (= v (- (@- 0) 1))))))
+                          ((m:function ((m:base integer (>= v 0)))
+                                       ((m:base integer (exists ((f:a14 integer))
+                                                                (and (= v (- f:a14 1))
+                                                                     (let ((v f:a14))
+                                                                       (= v (@- 0))))))))
+                           (m:function ((m:base integer true))
+                                       ((m:base integer (exists ((f:a15 integer))
+                                                                (and (= v (+ f:a15 1))
+                                                                     (let ((v f:a15))
+                                                                       (= v (@- 0))))))))))))
+
 (finalize)
