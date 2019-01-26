@@ -106,6 +106,14 @@
 (defvar *contract*)
 (declaim (type contract:contract *contract*))
 
+;;; if *assume-causality* is true, only consider as sources of values
+;;; skeleton:base that are causally available. This flag should only
+;;; be set to true when generating a condition (for a positive base)
+;;; in return position: that means we're generating a return value for
+;;; the polymorphic function or one of the functions it returned.
+(defvar *assume-causality*)
+(declaim (type boolean *assume-causality*))
+
 ;;; The logic here is very similar to generate-condition-for-base in
 ;;; `backfill-argument-conditions`: we're replacing bindings that aren't
 ;;; in scope, or not safe to directly refer to, by existentials that
@@ -163,6 +171,11 @@
     (when (typep location '(cons (eql c:@-)))
       (return-from approximate-local-condition-for-argument
         `(= c:v ,location))))
+  (when (and *assume-causality*
+             (not (causality:available-p base)))
+    ;; this base type can't flow into the return type we're currently
+    ;; generating.
+    (return-from approximate-local-condition-for-argument 'c:false))
   (occur-check:with-occur-check ((base) (return 'c:true))
     ;; (over)approximate the set of values that may flow into the
     ;; polymorphic function.
@@ -234,16 +247,30 @@
 
 ;;; Result, or value flowing out of the callee.
 (defun generate-condition-for-result (base)
-  (assert (positive-base-p base))
-  (let ((solution (contract:solution-or-nil *contract* base)))
-    (when solution
-      (return-from generate-condition-for-result
-        (relocalise-condition-in-place solution))))
-  (occur-check:with-occur-check-environment (#'equalp)
-    (check-all-local
-     (c:and-conditions (list (relocalise-condition-in-place
-                              (contract:constraint *contract* base))
-                             (approximate-local-condition-for-result base))))))
+  (destructuring-bind (name polarity flow position)
+      (s:split base)
+    (declare (ignore name flow))
+    (assert (eql polarity '+))
+    (let ((solution (contract:solution-or-nil *contract* base)))
+      (when solution
+        (return-from generate-condition-for-result
+          (relocalise-condition-in-place solution))))
+    (occur-check:with-occur-check-environment (#'equalp)
+      ;; we know we're describing values flowing out of the
+      ;; polymorphic function. if these values flow out as a result,
+      ;; what's currently in scope describes everything available to
+      ;; compute them. otherwise, we're computing the arguments we
+      ;; might pass to a function we received as argument, and the
+      ;; best we can do is obey dataflow annotations.
+      ;;
+      ;; n.b., it's always safe to not assume causality: it only means
+      ;; we are more conservative when determining all the ways we
+      ;; could generate values of a given type.
+      (let ((*assume-causality* (eql position :res)))
+        (check-all-local
+         (c:and-conditions (list (relocalise-condition-in-place
+                                  (contract:constraint *contract* base))
+                                 (approximate-local-condition-for-result base))))))))
 
 (defun generate-condition (base)
   (if (positive-base-p base)
@@ -257,9 +284,10 @@
   (destructuring-bind (skel-args skel-results)
       (s:split skel)
     (scoping:with-function-scope ((binding-vector skel-args))
-      (out:function (mapcar #'%monomorphise skel-args)
-                    (scoping:with-function-return-values ((binding-vector skel-results))
-                      (mapcar #'%monomorphise skel-results))))))
+      (causality:with-causes (skel-args)
+        (out:function (mapcar #'%monomorphise skel-args)
+                      (scoping:with-function-return-values ((binding-vector skel-results))
+                        (mapcar #'%monomorphise skel-results)))))))
 
 (defmethod %monomorphise ((skel s:box))
   (destructuring-bind (skel)
@@ -281,4 +309,5 @@
   (let ((*argument-global-conditions*
          (collect-argument-global-conditions *flow-info* conditions *contract*)))
     (scoping:with-environment ()
-      (%monomorphise skeleton))))
+      (causality:with-causality-tracking ()
+        (%monomorphise skeleton)))))

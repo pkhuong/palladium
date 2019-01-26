@@ -105,6 +105,7 @@
                       :depends-on ("ordered"
                                    "condition"
                                    "scoping"
+                                   "causality"
                                    "gather-skeleton-flow-info"
                                    "gather-argument-conditions"
                                    "gather-polymorphic-contract"

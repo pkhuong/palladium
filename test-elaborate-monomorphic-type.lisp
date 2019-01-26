@@ -11,7 +11,7 @@
 
 (setf prove:*default-test-function* #'equalp)
 
-(plan 5)
+(plan 6)
 
 ;;; Driving example: derive dataflow for the composition (.) operator.
 (is (monomorphise:elaborate
@@ -58,6 +58,68 @@
                                                       ((f:a15 integer))
                                                       (and (= v (- f:a15 1))
                                                            (let ((v f:a15))
+                                                             (= v (@- 0)))))))))))))))
+
+;;; Given the assumption of purity, causality and scoping match, so we
+;;; can even be tighter when multiple sources of `a` are available,
+;;; but in independent scopes.
+(is (monomorphise:elaborate
+     ;; this polymorphic accepts a first function, from any number of
+     ;; values to any number of values (functions are tuple->tuple,
+     ;; not curried), and another function that may accept the first
+     ;; function's results and returns an arbitrary number of values.
+     ;;
+     ;; the result is a function that accepts what the first argument
+     ;; accepts, and returns what the second returns.
+     (p:parse `(p:function ((p:function ((p:spread (a)))
+                                        ((p:spread (b))))
+                            (p:function ((p:spread (b)))
+                                        ((p:spread (c)))))
+                           ((p:function ((p:spread (a)))
+                                        ((p:spread (c))))
+                            (p:function ((p:spread (a)))
+                                        ((p:spread (c)))))))
+     ;; pass in `dec` for non-negative integers, and `inc` for
+     ;; arbitrary integers.
+     (m:parse `((m:function ((m:base integer (>= v 0)))
+                            ((m:base integer (= v (- (@- 0) 1)))))
+                (m:function ((m:base integer true))
+                            ((m:base integer (= v (+ (@- 0) 1)))))))
+     ;; expect anything
+     (p:parse `((p:spread (a)))))
+    ;; expected result:
+    ;;    ({int a : v >= 0} -> {int : v = a - 1})
+    ;; -> ({int a : v = x - 1, x >= 0} -> {int : v = a + 1}
+    ;; -> ({int a : v >= 0} -> {int : v = x + 1, x = a - 1}),
+    ;;    ({int a : v >= 0} -> {int : v = x + 1, x = a - 1}),
+    (m:parse `(m:function
+               ((m:function ((m:base integer (>= v 0)))
+                            ((m:base integer (= v (- (@- 0) 1)))))
+                (m:function ((m:base integer (exists
+                                              ((f:a16 integer))
+                                              (and (= v (- f:a16 1))
+                                                   (let ((v f:a16))
+                                                     (>= v 0))))))
+                            ((m:base integer (= v (+ (@- 0) 1))))))
+               ((m:function ((m:base integer (>= v 0)))
+                            ((m:base integer (exists
+                                              ((f:a17 integer))
+                                              (and (= v (+ f:a17 1))
+                                                   (let ((v f:a17))
+                                                     (exists
+                                                      ((f:a18 integer))
+                                                      (and (= v (- f:a18 1))
+                                                           (let ((v f:a18))
+                                                             (= v (@- 0)))))))))))
+                (m:function ((m:base integer (>= v 0)))
+                            ((m:base integer (exists
+                                              ((f:a19 integer))
+                                              (and (= v (+ f:a19 1))
+                                                   (let ((v f:a19))
+                                                     (exists
+                                                      ((f:a20 integer))
+                                                      (and (= v (- f:a20 1))
+                                                           (let ((v f:a20))
                                                              (= v (@- 0)))))))))))))))
 
 ;; similar, but with a tighter precondition on `inc`, and an explicit
