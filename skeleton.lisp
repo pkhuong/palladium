@@ -63,19 +63,23 @@
 
 (defstruct (base
              (:include type)
-             (:constructor base (name polarity flow)))
+             (:constructor base (name polarity flow position)))
   (name nil :type symbol :read-only t)
   ;; + is covariant (values returned by the function), - is
   ;; contravariant (values accepted by the function).
   (polarity nil :type (member + -) :read-only t)
   ;; list of equivalence classes where this type flows into and out
   ;; of, depending on polarity.
-  (flow nil :type (and cons (satisfies list-of-symbol)) :read-only t))
+  (flow nil :type (and cons (satisfies list-of-symbol)) :read-only t)
+  ;; whether this base type appears in (a type that appears in)
+  ;; argument position (arg), or in result position (res).
+  (position nil :type (member :arg :res) :read-only t))
 
 (defmethod split ((skeleton base))
   (list (base-name skeleton)
         (base-polarity skeleton)
-        (base-flow skeleton)))
+        (base-flow skeleton)
+        (base-position skeleton)))
 
 (defmethod build ((tag (eql 'base)) arguments)
   (apply #'base arguments))

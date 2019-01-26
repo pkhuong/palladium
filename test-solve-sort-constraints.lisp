@@ -23,12 +23,12 @@
 ;;; (a -> b) -> (b -> c) -> (a -> c)
 (is (dump-flow-vars
      (solve-sort-constraints:solution
-      (s:parse `(s:function ((s:function ((s:box (s:base f:b0 + (f:t0))))
-                                         ((s:base f:b1 - (f:t1))))
-                             (s:function ((s:base f:b2 + (f:t1)))
-                                         ((s:base f:b3 - (f:t2)))))
-                            ((s:function ((s:base f:b4 - (f:t0)))
-                                         ((s:base f:b5 + (f:t2)))))))
+      (s:parse `(s:function ((s:function ((s:box (s:base f:b0 + (f:t0) :arg)))
+                                         ((s:base f:b1 - (f:t1) :res)))
+                             (s:function ((s:base f:b2 + (f:t1) :arg))
+                                         ((s:base f:b3 - (f:t2) :res))))
+                            ((s:function ((s:base f:b4 - (f:t0) :arg))
+                                         ((s:base f:b5 + (f:t2) :res))))))
       (p:parse `(p:function ((p:function ((p:box (p:var (a))))
                                          ((p:var (b))))
                              (p:function ((p:var (b)))
@@ -47,12 +47,12 @@
 
 (is (solve-sort-constraints:sort-or-null
      (solve-sort-constraints:solution
-      (s:parse `(s:function ((s:function ((s:box (s:base f:b0 + (f:t0))))
-                                         ((s:base f:b1 - (f:t1))))
-                             (s:function ((s:base f:b2 + (f:t1)))
-                                         ((s:base f:b3 - (f:t2)))))
-                            ((s:function ((s:base f:b4 - (f:t0)))
-                                         ((s:base f:b5 + (f:t2)))))))
+      (s:parse `(s:function ((s:function ((s:box (s:base f:b0 + (f:t0) :arg)))
+                                         ((s:base f:b1 - (f:t1) :res)))
+                             (s:function ((s:base f:b2 + (f:t1) :arg))
+                                         ((s:base f:b3 - (f:t2) :res))))
+                            ((s:function ((s:base f:b4 - (f:t0) :arg))
+                                         ((s:base f:b5 + (f:t2) :res))))))
       (p:parse `(p:function ((p:function ((p:box (p:var (a))))
                                          ((p:var (b))))
                              (p:function ((p:var (b)))
@@ -70,12 +70,12 @@
 
 ;;; See what happens when the skeleton is missing some bindings
 (is (solve-sort-constraints:solution
-     (s:parse `(s:function ((s:function ((s:box (s:base f:b0 + (f:t0))))
-                                        ((s:base f:b1 - (f:t1))))
-                            (s:function ((s:base f:b2 + (f:t1)))
-                                        ((s:base f:b3 - (f:t2)))))
-                           ((s:function ((s:box (s:base f:b4 - (f:t3))))
-                                        ((s:base f:b5 + (f:t2)))))))
+     (s:parse `(s:function ((s:function ((s:box (s:base f:b0 + (f:t0) :arg)))
+                                        ((s:base f:b1 - (f:t1) :res)))
+                            (s:function ((s:base f:b2 + (f:t1) :arg))
+                                        ((s:base f:b3 - (f:t2) :res))))
+                           ((s:function ((s:box (s:base f:b4 - (f:t3) :arg)))
+                                        ((s:base f:b5 + (f:t2) :res))))))
      (p:parse `(p:function ((p:function ((p:box (p:var (a))))
                                         ((p:var (b))))
                             (p:function ((p:var (b)))
@@ -92,12 +92,12 @@
 ;;; same, with redundant constraints on polymorphic function and return.
 (is (dump-flow-vars
      (solve-sort-constraints:solution
-      (s:parse `(s:function ((s:function ((s:base f:b0 + (f:t0)))
-                                         ((s:base f:b1 - (f:t1))))
-                             (s:function ((s:base f:b2 + (f:t1)))
-                                         ((s:base f:b3 - (f:t2)))))
-                            ((s:function ((s:base f:b4 - (f:t0)))
-                                         ((s:base f:b5 + (f:t2)))))))
+      (s:parse `(s:function ((s:function ((s:base f:b0 + (f:t0) :arg))
+                                         ((s:base f:b1 - (f:t1) :res)))
+                             (s:function ((s:base f:b2 + (f:t1) :arg))
+                                         ((s:base f:b3 - (f:t2) :res))))
+                            ((s:function ((s:base f:b4 - (f:t0) :arg))
+                                         ((s:base f:b5 + (f:t2) :res))))))
       (p:parse `(p:function ((p:function ((p:base (a) integer nil))
                                          ((p:var (b))))
                              (p:function ((p:var (b)))
@@ -116,12 +116,12 @@
 
 ;;; incompatible constraint on polymorphic function
 (is (solve-sort-constraints:solution
-     (s:parse `(s:function ((s:function ((s:base f:b0 + (f:t0)))
-                                        ((s:base f:b1 - (f:t1))))
-                            (s:function ((s:base f:b2 + (f:t1)))
-                                        ((s:base f:b3 - (f:t2)))))
-                           ((s:function ((s:base f:b4 - (f:t0)))
-                                        ((s:base f:b5 + (f:t2)))))))
+     (s:parse `(s:function ((s:function ((s:base f:b0 + (f:t0) :arg))
+                                        ((s:base f:b1 - (f:t1) :res)))
+                            (s:function ((s:base f:b2 + (f:t1) :arg))
+                                        ((s:base f:b3 - (f:t2) :res))))
+                           ((s:function ((s:base f:b4 - (f:t0) :arg))
+                                        ((s:base f:b5 + (f:t2) :res))))))
      (p:parse `(p:function ((p:function ((p:base (a) float nil))
                                         ((p:var (b))))
                             (p:function ((p:var (b)))
@@ -138,12 +138,12 @@
 
 ;;; incompatible on return
 (is (solve-sort-constraints:solution
-     (s:parse `(s:function ((s:function ((s:base f:b0 + (f:t0)))
-                                        ((s:base f:b1 - (f:t1))))
-                            (s:function ((s:base f:b2 + (f:t1)))
-                                        ((s:base f:b3 - (f:t2)))))
-                           ((s:function ((s:base f:b4 - (f:t0)))
-                                        ((s:base f:b5 + (f:t2)))))))
+     (s:parse `(s:function ((s:function ((s:base f:b0 + (f:t0) :arg))
+                                        ((s:base f:b1 - (f:t1) :res)))
+                            (s:function ((s:base f:b2 + (f:t1) :arg))
+                                        ((s:base f:b3 - (f:t2) :res))))
+                           ((s:function ((s:base f:b4 - (f:t0) :arg))
+                                        ((s:base f:b5 + (f:t2) :res))))))
      (p:parse `(p:function ((p:function ((p:base (a) integer nil))
                                         ((p:var (b))))
                             (p:function ((p:var (b)))
@@ -160,12 +160,12 @@
 
 ;;; incompatible constraints in monotype.
 (is (solve-sort-constraints:solution
-     (s:parse `(s:function ((s:function ((s:base f:b0 + (f:t0)))
-                                        ((s:base f:b1 - (f:t1))))
-                            (s:function ((s:base f:b2 + (f:t1)))
-                                        ((s:base f:b3 - (f:t2)))))
-                           ((s:function ((s:base f:b4 - (f:t0)))
-                                        ((s:base f:b5 + (f:t2)))))))
+     (s:parse `(s:function ((s:function ((s:base f:b0 + (f:t0) :arg))
+                                        ((s:base f:b1 - (f:t1) :res)))
+                            (s:function ((s:base f:b2 + (f:t1) :arg))
+                                        ((s:base f:b3 - (f:t2) :res))))
+                           ((s:function ((s:base f:b4 - (f:t0) :arg))
+                                        ((s:base f:b5 + (f:t2) :res))))))
      (p:parse `(p:function ((p:function ((p:var (a)))
                                         ((p:var (b))))
                             (p:function ((p:var (b)))
@@ -182,11 +182,11 @@
 
 ;;; incompatible shape in poly function type.
 (is (solve-sort-constraints:solution
-     (s:parse `(s:function ((s:function ((s:base f:b0 + (f:t0)))
-                                        ((s:base f:b1 - (f:t1))))
-                            (s:function ((s:base f:b2 + (f:t1)))
-                                        ((s:base f:b3 - (f:t2)))))
-                           ((s:base f:b4 - (f:t0)))))
+     (s:parse `(s:function ((s:function ((s:base f:b0 + (f:t0) :arg))
+                                        ((s:base f:b1 - (f:t1) :res)))
+                            (s:function ((s:base f:b2 + (f:t1) :arg))
+                                        ((s:base f:b3 - (f:t2) :res))))
+                           ((s:base f:b4 - (f:t0) :res))))
      (p:parse `(p:function ((p:function ((p:var (a)))
                                         ((p:var (b))))
                             (p:function ((p:var (b)))
@@ -203,12 +203,12 @@
 
 ;;; incompatible monotypes.
 (is (solve-sort-constraints:solution
-     (s:parse `(s:function ((s:function ((s:base f:b0 + (f:t0)))
-                                        ((s:base f:b1 - (f:t1))))
-                            (s:function ((s:base f:b2 + (f:t1)))
-                                        ((s:base f:b3 - (f:t2)))))
-                           ((s:function ((s:base f:b4 - (f:t0)))
-                                        ((s:base f:b5 + (f:t2)))))))
+     (s:parse `(s:function ((s:function ((s:base f:b0 + (f:t0) :arg))
+                                        ((s:base f:b1 - (f:t1) :res)))
+                            (s:function ((s:base f:b2 + (f:t1) :arg))
+                                        ((s:base f:b3 - (f:t2) :res))))
+                           ((s:function ((s:base f:b4 - (f:t0) :arg))
+                                        ((s:base f:b5 + (f:t2) :res))))))
      (p:parse `(p:function ((p:function ((p:var (a)))
                                         ((p:var (b))))
                             (p:function ((p:var (b)))
@@ -225,12 +225,12 @@
 
 ;;; incompatible return type
 (is (solve-sort-constraints:solution
-     (s:parse `(s:function ((s:function ((s:base f:b0 + (f:t0)))
-                                        ((s:base f:b1 - (f:t1))))
-                            (s:function ((s:base f:b2 + (f:t1)))
-                                        ((s:base f:b3 - (f:t2)))))
-                           ((s:function ((s:base f:b4 - (f:t0)))
-                                        ((s:base f:b5 + (f:t2)))))))
+     (s:parse `(s:function ((s:function ((s:base f:b0 + (f:t0) :arg))
+                                        ((s:base f:b1 - (f:t1) :res)))
+                            (s:function ((s:base f:b2 + (f:t1) :arg))
+                                        ((s:base f:b3 - (f:t2) :res))))
+                           ((s:function ((s:base f:b4 - (f:t0) :arg))
+                                        ((s:base f:b5 + (f:t2) :res))))))
      (p:parse `(p:function ((p:function ((p:var (a)))
                                         ((p:var (b))))
                             (p:function ((p:var (b)))
@@ -247,12 +247,12 @@
 ;;; compatible return type if the mismatch is with a var.
 (is (dump-flow-vars
      (solve-sort-constraints:solution
-      (s:parse `(s:function ((s:function ((s:base f:b0 + (f:t0)))
-                                         ((s:base f:b1 - (f:t1))))
-                             (s:function ((s:base f:b2 + (f:t1)))
-                                         ((s:base f:b3 - (f:t2)))))
-                            ((s:function ((s:base f:b4 - (f:t0)))
-                                         ((s:base f:b5 + (f:t2)))))))
+      (s:parse `(s:function ((s:function ((s:base f:b0 + (f:t0) :arg))
+                                         ((s:base f:b1 - (f:t1) :res)))
+                             (s:function ((s:base f:b2 + (f:t1) :arg))
+                                         ((s:base f:b3 - (f:t2) :res))))
+                            ((s:function ((s:base f:b4 - (f:t0) :arg))
+                                         ((s:base f:b5 + (f:t2) :res))))))
       (p:parse `(p:function ((p:function ((p:var (a)))
                                          ((p:var (b))))
                              (p:function ((p:var (b)))
@@ -271,12 +271,12 @@
 ;;; same, but now the var is in the polymorphic type
 (is (dump-flow-vars
      (solve-sort-constraints:solution
-      (s:parse `(s:function ((s:function ((s:base f:b0 + (f:t0)))
-                                         ((s:base f:b1 - (f:t1))))
-                             (s:function ((s:base f:b2 + (f:t1)))
-                                         ((s:base f:b3 - (f:t2)))))
-                            ((s:function ((s:base f:b4 - (f:t0)))
-                                         ((s:base f:b5 + (f:t2)))))))
+      (s:parse `(s:function ((s:function ((s:base f:b0 + (f:t0) :arg))
+                                         ((s:base f:b1 - (f:t1) :res)))
+                             (s:function ((s:base f:b2 + (f:t1) :arg))
+                                         ((s:base f:b3 - (f:t2) :res))))
+                            ((s:function ((s:base f:b4 - (f:t0) :arg))
+                                         ((s:base f:b5 + (f:t2) :res))))))
       (p:parse `(p:function ((p:function ((p:var (a)))
                                          ((p:var (b))))
                              (p:var (c)))

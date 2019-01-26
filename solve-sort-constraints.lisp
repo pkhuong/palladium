@@ -67,9 +67,9 @@
     (%traverse contents)))
 
 (defmethod %traverse ((skel s:base))
-  (destructuring-bind (name polarity flow)
+  (destructuring-bind (name polarity flow position)
       (s:split skel)
-    (declare (ignore name polarity))
+    (declare (ignore name polarity position))
     (uf:observe-equivalence *solution* flow)))
 
 ;;; Actual constraint gathering code.
@@ -108,9 +108,9 @@
   (destructuring-bind (flow sort condition)
       (p:split poly)
     (declare (ignore flow condition))
-    (destructuring-bind (name polarity flow)
+    (destructuring-bind (name polarity flow position)
         (s:split skel)
-      (declare (ignore name polarity))
+      (declare (ignore name polarity position))
       (assert flow)
       (if (eql sort '*)
           (uf:observe-equivalence *solution* flow)
@@ -139,9 +139,9 @@
   (destructuring-bind (sort condition)
       (m:split mono)
     (declare (ignore condition))
-    (destructuring-bind (name polarity flow)
+    (destructuring-bind (name polarity flow position)
         (s:split skel)
-      (declare (ignore name polarity))
+      (declare (ignore name polarity position))
       (assert flow)
       (uf:observe-equivalence *solution* flow :attribute sort))))
 

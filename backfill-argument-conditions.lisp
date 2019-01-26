@@ -20,11 +20,12 @@
 
 (defun should-backfill (base)
   (declare (type s:base base))
-  (destructuring-bind (name polarity flow)
+  (destructuring-bind (name polarity flow position)
       (s:split base)
-    (declare (ignore name flow))
+    (declare (ignore name flow position))
     (and (eql polarity '-)
-         (not (conditions:base-condition *conditions* base)))))
+         (not (conditions:base-condition *conditions* base)))
+    ))
 
 (defun generate-condition-for-base (base)
   (check-type base s:base)

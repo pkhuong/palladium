@@ -31,9 +31,9 @@
 (defun base-condition (conditions base)
   (declare (type conditions conditions)
            (type s:base base))
-  (destructuring-bind (name polarity flow)
+  (destructuring-bind (name polarity flow position)
       (s:split base)
-    (declare (ignore flow))
+    (declare (ignore flow position))
     (values (ordered:find (ecase polarity
                             (- (conditions-arguments conditions))
                             (+ (conditions-sinks conditions)))
@@ -43,9 +43,9 @@
   (declare (type conditions conditions)
            (type s:base base)
            (type (or cons (and symbol (not (member nil *))))))
-  (destructuring-bind (name polarity flow)
+  (destructuring-bind (name polarity flow position)
       (s:split base)
-    (declare (ignore flow))
+    (declare (ignore flow position))
     (let ((destination (ecase polarity
                          (- (conditions-arguments conditions))
                          (+ (conditions-sinks conditions)))))
@@ -86,9 +86,9 @@
       (%gather-mono-conditions skel mono))))
 
 (defmethod %gather-mono-conditions ((skel s:base) (mono m:base))
-  (destructuring-bind (name polarity flow)
+  (destructuring-bind (name polarity flow position)
       (s:split skel)
-    (declare (ignore flow))
+    (declare (ignore flow position))
     (destructuring-bind (sort condition)
         (m:split mono)
       (declare (ignore sort))
@@ -165,9 +165,9 @@
   (destructuring-bind (flow sort condition)
       (p:split poly)
     (declare (ignore flow))
-    (destructuring-bind (name polarity flow)
+    (destructuring-bind (name polarity flow position)
         (s:split skel)
-      (declare (ignore flow))
+      (declare (ignore flow position))
       ;; we only store negative (argument) polarity,
       ;; and we obey *only-store-fully-typed-conditions*
       (when (or (eql polarity '+)

@@ -13,12 +13,12 @@
 (plan 8)
 
 ;;; a -> int: the result is a full solution.
-(let ((skel (s:parse `(s:function ((s:box (s:base f:b0 - (a))))
-                                  ((s:base f:b1 + (b))))))
+(let ((skel (s:parse `(s:function ((s:box (s:base f:b0 - (a) :arg)))
+                                  ((s:base f:b1 + (b) :res)))))
       (poly (p:parse `(p:function ((p:var (a)))
                                   ((p:base (b) integer (= c:v 42))))))
-      (b0 (s:parse `(s:base f:b0 - (a))))
-      (b1 (s:parse `(s:base f:b1 + (b))))
+      (b0 (s:parse `(s:base f:b0 - (a) :arg)))
+      (b1 (s:parse `(s:base f:b1 + (b) :res)))
       contract)
   (isnt (setf contract (contract:contract skel poly)) nil)
   (is (contract:solution-or-nil contract b1)
@@ -28,15 +28,15 @@
 
 ;;; gather constraints when in negative position or the sort is left
 ;;; unspecified.
-(let ((skel (s:parse `(s:function ((s:base f:b0 - (a))
-                                   (s:box (s:base f:b1 - (b))))
-                                  ((s:base f:b2 + (b))))))
+(let ((skel (s:parse `(s:function ((s:base f:b0 - (a) :arg)
+                                   (s:box (s:base f:b1 - (b) :arg)))
+                                  ((s:base f:b2 + (b) :res)))))
       (poly (p:parse `(p:function ((p:base (a) integer (> c:v 0))
                                    (p:box (p:base (b) * nil)))
                                   ((p:base (c) * (> c:v (c:@- 0)))))))
-      (b0 (s:parse `(s:base f:b0 - (a))))
-      (b1 (s:parse `(s:base f:b1 - (b))))
-      (b2 (s:parse `(s:base f:b2 + (b))))
+      (b0 (s:parse `(s:base f:b0 - (a) :arg)))
+      (b1 (s:parse `(s:base f:b1 - (b) :arg)))
+      (b2 (s:parse `(s:base f:b2 + (b) :res)))
       contract)
   (isnt (setf contract (contract:contract skel poly)) nil)
   (is (contract:solution-or-nil contract b2) nil)

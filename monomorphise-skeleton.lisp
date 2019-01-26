@@ -16,8 +16,6 @@
 ;;; `base-sources` to find all the (negative) bases that may flow
 ;;; there, and take the union of the set of values that may be bound
 ;;; to these s:base.
-;;;
-;;; XXX: actually, monomorphise skeleton is a better name?
 (defpackage "MONOMORPHISE-SKELETON"
   (:export "MONOMORPHISE")
   (:use "CL")
@@ -33,9 +31,9 @@
 (defun polarity-base-p (skel expected-polarity)
   (check-type skel s:type)
   (and (s:base-p skel)
-       (destructuring-bind (name actual-polarity flow)
+       (destructuring-bind (name actual-polarity flow position)
            (s:split skel)
-         (declare (ignore name flow))
+         (declare (ignore name flow position))
          (eql actual-polarity expected-polarity))))
 
 (defun positive-base-p (skel)
@@ -49,7 +47,7 @@
                         (and (s:base-p skel) skel))
        skels))
 
-;;; Consruct a map from base name -> global condition for values
+;;; Construct a map from base name -> global condition for values
 ;;; flowing in.
 (defun collect-argument-global-conditions (flow conditions contract)
   (declare (type flow-info:info flow)
@@ -58,9 +56,9 @@
   (let ((global-conditions (ordered:map)))  ;; base name -> joined condition
     (dolist (base (flow-info:all-bases flow) global-conditions)
       ;; only do this for values flowing in.
-      (destructuring-bind (name polarity flow)
+      (destructuring-bind (name polarity flow position)
           (s:split base)
-        (declare (ignore flow))
+        (declare (ignore flow position))
         (when (eql polarity '-)
           (let ((actual-condition (arguments:base-condition conditions base))
                 (precondition (contract:constraint contract base)))
@@ -88,7 +86,6 @@
 ;;;
 ;;; However, we are allowed (and want to) refer to everything when
 ;;; localising conditions where they were defined. (XXX double check)
-
 (defvar *flow-info*)
 (declaim (type flow-info:info *flow-info*))
 
@@ -98,9 +95,9 @@
 
 (defun argument-global-condition (base)
   (declare (type s:base base))
-  (destructuring-bind (name polarity flow)
+  (destructuring-bind (name polarity flow position)
       (s:split base)
-    (declare (ignore flow))
+    (declare (ignore flow position))
     (assert (eql polarity '-))
     (let ((condition (ordered:find *argument-global-conditions* name)))
       (assert condition)

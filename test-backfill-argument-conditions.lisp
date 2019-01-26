@@ -44,13 +44,13 @@
 (let ((c:*counter* 0)
       skeleton sort-solution flow-info argument-conditions)
   (is (setf skeleton (poly-to-skeleton:convert *poly* *mono*))
-      (s:parse `(s:function ((s:function ((s:base f:b0 + (foo)))
-                                         ((s:function ((s:base f:b1 + (a)))
-                                                      ((s:box (s:base f:b2 - (b)))))))
-                             (s:function ((s:base f:b3 + (b)))
-                                         ((s:base f:b4 - (c)))))
-                            ((s:function ((s:base f:b5 - (a)))
-                                         ((s:base f:b6 + (c))))))))
+      (s:parse `(s:function ((s:function ((s:base f:b0 + (foo) :arg))
+                                         ((s:function ((s:base f:b1 + (a) :arg))
+                                                      ((s:box (s:base f:b2 - (b) :res))))))
+                             (s:function ((s:base f:b3 + (b) :arg))
+                                         ((s:base f:b4 - (c) :res))))
+                            ((s:function ((s:base f:b5 - (a) :arg))
+                                         ((s:base f:b6 + (c) :res)))))))
   (isnt (setf sort-solution
               (solve-sort-constraints:solution skeleton
                                                *poly*
@@ -65,7 +65,7 @@
   (is (gather-argument-conditions:base-condition
        (gather-argument-conditions:conditions *poly* skeleton
                                               *mono* *explicit-return*)
-       (s:parse `(s:base f:b5 - (a))))
+       (s:parse `(s:base f:b5 - (a) :arg)))
       `(>= c:v 2))
 
   ;; Next, test type hallucination.
@@ -76,7 +76,7 @@
 
   ;; confirm the returned function's argument isn't constrained
   (is (gather-argument-conditions:base-condition argument-conditions
-                                                 (s:parse `(s:base f:b5 - (a))))
+                                                 (s:parse `(s:base f:b5 - (a) :arg)))
       nil)
 
   ;; backfill should succeed and propagate the constraint to the argument
@@ -85,7 +85,7 @@
          skeleton flow-info argument-conditions)
         (gather-argument-conditions:base-condition
          argument-conditions
-         (s:parse `(s:base f:b5 - (a)))))
+         (s:parse `(s:base f:b5 - (a) :arg))))
       `(c:exists ((f:h7 integer))
                  (and (>= c:v 0)
                       (/= c:v f:h7)

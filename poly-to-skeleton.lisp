@@ -30,6 +30,9 @@
   (ecase polarity
     (+ '-)
     (- '+)))
+
+(defvar *position*)
+(declaim (type (member :arg :res) *position*))
 
 ;;; Implementation of to-skeleton
 (defun list-to-skeleton (mono-types)
@@ -39,12 +42,16 @@
 (defmethod to-skeleton ((mono m:function))
   (destructuring-bind (mono-args mono-results)
       (m:split mono)
-    (out:function (list-to-skeleton mono-args)
-                  (list-to-skeleton mono-results))))
+    (out:function (let ((*position* :arg))
+                    (list-to-skeleton mono-args))
+                  (let ((*position* :res))
+                    (list-to-skeleton mono-results)))))
 
 (defmethod to-skeleton ((mono m:base))
-  ;; pass in an explicit name because it'll get renamed.
-  (out:base 'fresh:b0 '+ (list (c:fresh '#:t))))
+  ;; pass in dummy name / polarity / position because it all gets
+  ;; overwritten. the only thing that matters is having a fresh flow
+  ;; variable.
+  (out:base 'fresh:b0 '+ (list (c:fresh '#:t)) :arg))
 
 (defmethod to-skeleton ((mono m:box))
   (destructuring-bind (contents)
@@ -66,6 +73,7 @@
       (out:split x)
     (destructuring-bind (y-arguments y-results)
         (out:split y)
+      ;; skeletons don't track position.
       (out:function (merge-skeleton-lists x-arguments y-arguments)
                     (merge-skeleton-lists x-results y-results)))))
 
@@ -77,19 +85,21 @@
       (out:box (merge-skeletons x-contents y-contents)))))
 
 (defmethod merge-skeletons ((x out:base) (y out:base))
-  (destructuring-bind (x-name x-polarity x-flow)
+  (destructuring-bind (x-name x-polarity x-flow x-position)
       (out:split x)
-    (declare (ignore x-name))
-    (destructuring-bind (y-name y-polarity y-flow)
+    (destructuring-bind (y-name y-polarity y-flow y-position)
         (out:split y)
-      (declare (ignore y-name))
+      (assert (eql x-name 'fresh:b0))
       (assert (eql x-polarity '+))
+      (assert (eql x-position :arg))
+      (assert (eql y-name 'fresh:b0))
       (assert (eql y-polarity '+))
+      (assert (eql y-position :arg))
       (let ((flows (ordered:set)))
         (ordered:record-all flows x-flow)
         (ordered:record-all flows y-flow)
-        ;; we don't need real base location names here.
-        (out:base 'fresh:b0 '+ (ordered:entries flows))))))
+        ;; we only care about the flows here.
+        (out:base 'fresh:b0 '+ (ordered:entries flows) :arg)))))
 
 ;;; Implementation of ensure-polarity
 (defun ensure-polarity-list (skeletons polarity)
@@ -100,8 +110,10 @@
 (defmethod ensure-polarity ((skel out:function) polarity)
   (destructuring-bind (arguments results)
       (out:split skel)
-    (out:function (ensure-polarity-list arguments (negate polarity))
-                  (ensure-polarity-list results polarity))))
+    (out:function (let ((*position* :arg))
+                    (ensure-polarity-list arguments (negate polarity)))
+                  (let ((*position* :res))
+                    (ensure-polarity-list results polarity)))))
 
 (defmethod ensure-polarity ((skel out:box) polarity)
   (destructuring-bind (contents)
@@ -109,10 +121,10 @@
     (out:box (ensure-polarity contents polarity))))
 
 (defmethod ensure-polarity ((skel out:base) polarity)
-  (destructuring-bind (name skel-polarity flow)
+  (destructuring-bind (name skel-polarity flow position)
       (out:split skel)
-    (declare (ignore name skel-polarity))
-    (out:base (c:fresh '#:b) polarity flow)))
+    (declare (ignore name skel-polarity position))
+    (out:base (c:fresh '#:b) polarity flow *position*)))
 
 ;;; Intern or find preexisting extensions for tvars
 
@@ -153,8 +165,10 @@
       (in:split poly)
     (destructuring-bind (mono-args mono-results)
         (m:split mono)
-      (out:function (convert-list poly-args mono-args (negate polarity))
-                    (convert-list poly-results mono-results polarity)))))
+      (out:function (let ((*position* :arg))
+                      (convert-list poly-args mono-args (negate polarity)))
+                    (let ((*position* :res))
+                      (convert-list poly-results mono-results polarity))))))
 
 (defmethod %convert ((poly in:box) (mono m:box) polarity)
   (destructuring-bind (poly-contents)
@@ -167,7 +181,7 @@
   (destructuring-bind (flow sort condition)
       (in:split poly)
     (declare (ignore sort condition))
-    (out:base (c:fresh '#:b) polarity flow)))
+    (out:base (c:fresh '#:b) polarity flow *position*)))
 
 (defmethod %convert ((poly in:var) (mono m:type) polarity)
   (destructuring-bind (flow)
@@ -192,8 +206,10 @@
 (defmethod %expand ((poly in:function) polarity)
   (destructuring-bind (poly-args poly-results)
       (in:split poly)
-    (out:function (expand-list poly-args (negate polarity))
-                  (expand-list poly-results polarity))))
+    (out:function (let ((*position* :arg))
+                    (expand-list poly-args (negate polarity)))
+                  (let ((*position* :res))
+                    (expand-list poly-results polarity)))))
 
 (defmethod %expand ((poly in:box) polarity)
   (destructuring-bind (contents)
@@ -204,7 +220,7 @@
   (destructuring-bind (flow sort condition)
       (in:split poly)
     (declare (ignore sort condition))
-    (out:base (c:fresh '#:b) polarity flow)))
+    (out:base (c:fresh '#:b) polarity flow *position*)))
 
 (defmethod %expand ((poly in:var) polarity)
   (destructuring-bind (flow)
@@ -222,8 +238,10 @@
     (flet ((convert ()
              (destructuring-bind (arguments results)
                  (in:split poly)
-               (out:function (convert-list arguments mono-types '-)
-                             (expand-list results '+)))))
+               (out:function (let ((*position* :arg))
+                               (convert-list arguments mono-types '-))
+                             (let ((*position* :res))
+                               (expand-list results '+))))))
       (format *error-output*
               "Failed in ~S: ~A~%"
               'convert

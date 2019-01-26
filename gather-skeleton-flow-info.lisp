@@ -23,9 +23,9 @@
 (defun base-sort (info base)
   (declare (type info info)
            (type s:base base))
-  (destructuring-bind (name polarity flow)
+  (destructuring-bind (name polarity flow position)
       (s:split base)
-    (declare (ignore polarity flow))
+    (declare (ignore polarity flow position))
     (ordered:find (info-base-sort info) name)))
 
 (defun base-sinks (info base)
@@ -33,9 +33,9 @@
    skeleton base might flow."
   (declare (type info info)
            (type s:base base))
-  (destructuring-bind (name polarity flow)
+  (destructuring-bind (name polarity flow position)
       (s:split base)
-    (declare (ignore name))
+    (declare (ignore name position))
     (assert (eql polarity '-))
     (let ((sinks (ordered:set :test #'equalp))
           (flow-sinks (info-flow-sinks info)))
@@ -48,9 +48,9 @@
 (defun base-sources (info base)
   "Returns all the negative skeleton bases that may flow to this
   positive skeleton base."
-  (destructuring-bind (name polarity flow)
+  (destructuring-bind (name polarity flow position)
       (s:split base)
-    (declare (ignore name))
+    (declare (ignore name position))
     (assert (eql polarity '+))
     (let ((sources (ordered:set :test #'equalp))
           (flow-sources (info-flow-sources info)))
@@ -101,8 +101,9 @@
 (defmethod %populate-flow-info ((skeleton s:base))
   ;; keep note of every s:base we've seen.
   (ordered:record (info-bases *info*) skeleton)
-  (destructuring-bind (name polarity flow)
+  (destructuring-bind (name polarity flow position)
       (s:split skeleton)
+    (declare (ignore position))
     (register-sort name (find-sort flow))
     (let ((destination (ecase polarity
                          (- (info-flow-sources *info*))

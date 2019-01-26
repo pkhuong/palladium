@@ -41,12 +41,12 @@
       conditions
       contract)
   (is (setf skeleton (poly-to-skeleton:convert *poly* *mono*))
-      (s:parse `(s:function ((s:function ((s:base f:b1 + (f:t0)))
-                                         ((s:base f:b3 - (f:t2))))
-                             (s:function ((s:base f:b4 + (f:t2)))
-                                         ((s:base f:b6 - (f:t5)))))
-                            ((s:function ((s:base f:b7 - (f:t0)))
-                                         ((s:base f:b8 + (f:t2))))))))
+      (s:parse `(s:function ((s:function ((s:base f:b1 + (f:t0) :arg))
+                                         ((s:base f:b3 - (f:t2) :res)))
+                             (s:function ((s:base f:b4 + (f:t2) :arg))
+                                         ((s:base f:b6 - (f:t5) :res))))
+                            ((s:function ((s:base f:b7 - (f:t0) :arg))
+                                         ((s:base f:b8 + (f:t2) :res)))))))
   (isnt (setf sort-solution
               (solve-sort-constraints:solution skeleton *poly* *mono* *return*))
         nil)
