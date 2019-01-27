@@ -194,34 +194,29 @@
     ;; polymorphic function.
     (approximate-local-condition (argument-global-condition base))))
 
-;; Come up with a localised approximation of the polymorphic
-;; function's postcondition on this positive type.
-;;
-;; If the postcondition is actually a solution, return that directly.
-;;
-;; The second return value is true iff the primary return value is a
-;; solution, not just an additional constraint.
-(defun approximate-constraint-for-result (base)
-  (declare (type s:base base))
-  (assert (positive-base-p base))
-  (let ((solution (contract:solution-or-nil *contract* base)))
-    (values (approximate-local-condition
-             (or solution
-                 (contract:constraint *contract* base)))
-            solution)))
-
 (defun approximate-local-condition-for-base (base)
   (declare (type s:base base))
   (cond ((negative-base-p base)
          (approximate-local-condition-for-argument base))
         (t
          (assert (positive-base-p base))
-         (multiple-value-bind (constraint fully-solved)
-             (approximate-constraint-for-result base)
-           (if fully-solved
-               constraint
-               (c:and-conditions (list constraint
-                                       (approximate-local-condition-for-result base))))))))
+         ;; the logic here implements the same thing as
+         ;; generate-condition-for-result: if the polymorphic base
+         ;; specified a sort, the condition describes values that it
+         ;; may create de novo, otherwise it's an additional
+         ;; constraint. At most one of solution or constraint is
+         ;; populated for any base, but it's simpler to code as if
+         ;; both could be present, with appropriate defaults.
+         (let ((solution (approximate-local-condition
+                          ;; only populated if the sort is known.
+                          (or (contract:solution-or-nil *contract* base)
+                              'c:false)))
+               (constraint (approximate-local-condition
+                            (contract:constraint *contract* base)))
+               (flow-in (approximate-local-condition-for-result base)))
+           (c:or-conditions (list solution
+                                  (c:and-conditions (list constraint
+                                                          flow-in))))))))
 
 (defun approximate-local-condition-for-result (base)
   (declare (type s:base base))
