@@ -11,7 +11,7 @@
 
 (setf prove:*default-test-function* #'equalp)
 
-(plan 13)
+(plan 19)
 
 ;;; Driving example: derive dataflow for the composition (.) operator.
 (is (monomorphise:elaborate
@@ -353,6 +353,25 @@
                            (m:function ((m:base integer (>= v (@+ 0 1))))
                                        ())))))
 
+(monomorphise:elaborate
+     (p:parse `(p:function ((p:function ((p:var (a)) (p:base (b) * nil))
+                                        ((p:var (a))))
+                            (p:var (a))
+                            (p:box (p:base (b) * (>= v 0))))
+                           ((p:var (a)))))
+     ;; first argument to the first-class function is the non-negative accumulator,
+     ;;  second argument is a strictly positive integer.
+     ;; the second argument is the initial accumulator, which is *not* non-negative.
+     ;; the third argument is a box (e.g., list) of not-too-negative integers.
+     (m:parse `((m:function ((m:base integer (>= v 0))
+                             (m:base integer (>= v 1)))
+                            ((m:base integer (and (= v (+ (@- 0) (@- 1)))
+                                                  (> v 0)
+                                                  (> v (@- 0))))))
+                (m:base integer true)
+                (m:box (m:base integer (>= v -1)))))
+     (p:parse `((p:base (z) integer true))))
+
 ;;; Make sure we don't croak on fold.
 ;;;
 ;;; This example shows three things:
@@ -414,7 +433,15 @@
                                     (exists ((f:a9 integer) (f:a10 integer))
                                             (and (= v (+ f:a9 f:a10)) (> v 0) (> v f:a9)
                                                  (let ((v f:a10))
-                                                   (and (>= v -1) (>= v 0)))))
+                                                   (and (>= v -1) (>= v 0)))
+                                                 (let ((v f:a9))
+                                                   (or
+                                                    (exists ((f:a11 integer) (f:a12 integer))
+                                                            (and (= v (+ f:a11 f:a12)) (> v 0)
+                                                                 (> v f:a11)
+                                                                 (let ((v f:a12))
+                                                                   (and (>= v -1) (>= v 0)))))
+                                                    (= v (@- 1))))))
                                     (= v (@- 1))))))))
 
 ;; trivial case: a function that accepts any integer and returns 0.
@@ -474,5 +501,141 @@
                                                                 (and (= v (+ f:a15 1))
                                                                      (let ((v f:a15))
                                                                        (= v (@- 0))))))))))))
+
+;; Let's say we have (x y -> x - y), with the constraint that x ==
+;; y. we should be able to determine that the return value is 0.
+(is (monomorphise:elaborate
+     (p:parse `(p:function ((p:box (p:base (a) * nil))
+                            (p:function ((p:base (a) * nil) (p:base (a) * (= v (@- 0))))
+                                        ((p:var (c)))))
+                           ((p:var (c)))))
+     (m:parse `((m:box (m:base integer true))
+                (m:function ((m:base integer true)
+                             (m:base integer (= v (@- 0))))
+                            ((m:base integer (= v (- (@- 0) (@- 1))))))))
+     (p:parse `((p:base (a) * nil))))
+    (m:parse `(m:function ((m:box (m:base integer true))
+                           (m:function ((m:base integer true)
+                                        (m:base integer (= v (@- 0))))
+                                       ((m:base integer (= v (- (@- 0) (@- 1)))))))
+                          ((m:base integer (exists ((f:a6 integer)
+                                                    (f:a7 integer))
+                                                   (and (= v (- f:a6 f:a7))
+                                                        (let ((v f:a7))
+                                                          (= v f:a6)))))))))
+
+;; Same, but constraint only comes from the polymorphic type
+(is (monomorphise:elaborate
+     (p:parse `(p:function ((p:box (p:base (a) * nil))
+                            (p:function ((p:base (a) * nil) (p:base (a) * (= v (@- 0))))
+                                        ((p:var (c)))))
+                           ((p:var (c)))))
+     (m:parse `((m:box (m:base integer true))
+                (m:function ((m:base integer true)
+                             (m:base integer true))
+                            ((m:base integer (= v (- (@- 0) (@- 1))))))))
+     (p:parse `((p:base (a) * nil))))
+    (m:parse `(m:function ((m:box (m:base integer true))
+                           (m:function ((m:base integer true)
+                                        (m:base integer (= v (@- 0))))
+                                       ((m:base integer (= v (- (@- 0) (@- 1)))))))
+                          ((m:base integer (exists ((f:a6 integer)
+                                                    (f:a7 integer))
+                                                   (and (= v (- f:a6 f:a7))
+                                                        (let ((v f:a7))
+                                                          (= v f:a6)))))))))
+
+;; Make sure we're OK with circularity
+(is (monomorphise:elaborate
+     (p:parse `(p:function ((p:box (p:base (a) * nil))
+                            (p:function ((p:base (a) * (= v (@- 1)))
+                                         (p:base (a) * (= v (@- 0))))
+                                        ((p:var (c)))))
+                           ((p:var (c)))))
+     (m:parse `((m:box (m:base integer true))
+                (m:function ((m:base integer true)
+                             (m:base integer true))
+                            ((m:base integer (= v (- (@- 0) (@- 1))))))))
+     (p:parse `((p:base (a) * nil))))
+    (m:parse `(m:function ((m:box (m:base integer true))
+                           (m:function ((m:base integer (= v (@- 1)))
+                                        (m:base integer (= v (@- 0))))
+                                       ((m:base integer (= v (- (@- 0) (@- 1)))))))
+                          ((m:base integer (exists ((f:a6 integer)
+                                                    (f:a7 integer))
+                                                   (and (= v (- f:a6 f:a7))
+                                                        (let ((v f:a7))
+                                                          (= v f:a6))
+                                                        (let ((v f:a6))
+                                                          (= v f:a7)))))))))
+
+;; fully specified base type.
+(is (monomorphise:elaborate
+     (p:parse `(p:function ((p:box (p:base (a) * nil))
+                            (p:function ((p:base (b) integer (= v (@- 1)))
+                                         (p:base (a) * (= v (@- 0))))
+                                        ((p:var (c)))))
+                           ((p:var (c)))))
+     (m:parse `((m:box (m:base integer (>= v 0)))
+                (m:function ((m:base integer true)
+                             (m:base integer true))
+                            ((m:base integer (= v (- (@- 0) (@- 1))))))))
+     (p:parse `((p:base (a) * nil))))
+    (m:parse `(m:function ((m:box (m:base integer (>= v 0)))
+                           (m:function ((m:base integer (= v (@- 1)))
+                                        (m:base integer (and (= v (@- 0))
+                                                             (>= v 0))))
+                                       ((m:base integer (= v (- (@- 0) (@- 1)))))))
+                          ((m:base integer (exists ((f:a6 integer)
+                                                    (f:a7 integer))
+                                                   (and (= v (- f:a6 f:a7))
+                                                        (let ((v f:a7))
+                                                          (and (= v f:a6) (>= v 0)))
+                                                        (let ((v f:a6))
+                                                          (= v f:a7)))))))))
+
+;; Now what happens when the base type is fully specified, but we also
+;; have an extra source of values.
+(is (monomorphise:elaborate
+     (p:parse `(p:function ((p:box (p:base (a) * nil))
+                            (p:function ((p:base (a) integer (= v (@- 1)))
+                                         (p:base (a) integer (= v (@- 0))))
+                                        ((p:var (c)))))
+                           ((p:var (c)))))
+     (m:parse `((m:box (m:base integer true))
+                (m:function ((m:base integer true)
+                             (m:base integer true))
+                            ((m:base integer (= v (- (@- 0) (@- 1))))))))
+     (p:parse `((p:base (a) * nil))))
+    (m:parse `(m:function ((m:box (m:base integer true))
+                           (m:function ((m:base integer true)
+                                        (m:base integer true))
+                                       ((m:base integer (= v (- (@- 0) (@- 1)))))))
+                          ((m:base integer (exists ((f:a6 integer)
+                                                    (f:a7 integer))
+                                                   (= v (- f:a6 f:a7))))))))
+
+;; Symmetric constraints from both the arguments and the polymorphic
+;; function should only use the polymorphic function's constraints.
+(is (monomorphise:elaborate
+     (p:parse `(p:function ((p:box (p:base (a) * nil))
+                            (p:function ((p:base (a) * (= v (@- 1)))
+                                         (p:base (a) * nil))
+                                        ((p:var (c)))))
+                           ((p:var (c)))))
+     (m:parse `((m:box (m:base integer true))
+                (m:function ((m:base integer true)
+                             (m:base integer (= v (@- 0))))
+                            ((m:base integer (= v (- (@- 0) (@- 1))))))))
+     (p:parse `((p:base (a) * nil))))
+    (m:parse `(m:function ((m:box (m:base integer true))
+                           (m:function ((m:base integer (= v (@- 1)))
+                                        (m:base integer true))
+                                       ((m:base integer (= v (- (@- 0) (@- 1)))))))
+                          ((m:base integer (exists ((f:a6 integer)
+                                                    (f:a7 integer))
+                                                   (and (= v (- f:a6 f:a7))
+                                                        (let ((v f:a6))
+                                                          (= v f:a7)))))))))
 
 (finalize)

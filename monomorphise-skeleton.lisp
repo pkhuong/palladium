@@ -124,80 +124,106 @@
 (defvar *assume-purity*)
 (declaim (type boolean *assume-purity*))
 
+(defstruct (local-condition-environment
+             (:conc-name #:lce-))
+  ;; map from base -> gensym.
+  (map (ordered:map :test #'equalp) :type ordered:map :read-only t)
+  ;; list of localised conditions that must all hold.
+  (conditions '() :type list #| localised condition |#)
+  ;; list of base for which to generate side conditions.
+  (to-process '() :type list #| base |#))
+
+;;; Converts the local environment's map of gensyms to `exists` bindings,
+;;; and pushes the conditions in there.
+(defun instantiate-local-condition-environment (environment)
+  (declare (type local-condition-environment environment))
+  (assert (null (lce-to-process environment)))
+  (let ((bindings '())
+        (body (c:and-conditions (reverse (lce-conditions environment)))))
+    (loop for (base . gensym) in (ordered:entries (lce-map environment))
+       do (push `(,gensym ,(flow-info:base-sort *flow-info* base)) bindings))
+    (if bindings
+        `(c:exists ,(nreverse bindings)
+                   ,body)
+        body)))
+
+;;; Localises negative `initial-base`, with an environment that reuses bindings
+;;; for existentials as much as possible.
+(defun localise-with-environment (initial-base)
+  (declare (type s:base initial-base))
+  (let ((environment (make-local-condition-environment)))
+    (push (approximate-local-condition-for-base initial-base environment)
+          (lce-conditions environment))
+    (loop while (lce-to-process environment)
+       do (let* ((to-process (pop (lce-to-process environment)))
+                 (gensym (or (ordered:find (lce-map environment) to-process)
+                             (error "Condition for unknown s:base")))
+                 (localised (approximate-local-condition-for-base to-process
+                                                                  environment)))
+            (push (if (c:mentions-v localised)
+                      `(let ((c:v ,gensym))
+                         ,localised)
+                      localised)
+                  (lce-conditions environment))))
+    (instantiate-local-condition-environment environment)))
+
 ;;; The logic here is very similar to generate-condition-for-base in
 ;;; `backfill-argument-conditions`: we're replacing bindings that aren't
 ;;; in scope, or not safe to directly refer to, by existentials that
 ;;; approximate the values that could go there.
 
 ;;; Rewrite a condition to replace arguments in scope with existentials.
-(defun approximate-local-condition (condition)
+(defun localise-one-condition-with-environment (condition environment)
   (assert condition)
-  (let ((to-bind (ordered:map :test #'equalp)))
-    (flet ((rewrite (expression reference)
-             (cond ((and (typep reference '(cons (eql c:@-)))
-                         (negative-base-p expression))
-                    ;; Only safe to refer to negative polarity
-                    ;; arguments. negative polarity return values
-                    ;; could come from functions invoked repeatedly.
-                    reference)
-                   (t
-                    ;; make up a new binding that will be made to look like
-                    ;; something bound to this s:base.
-                    (or (ordered:find to-bind expression)
-                        (let ((fresh (c:fresh '#:a)))
-                          (ordered:record to-bind (cons expression fresh))
-                          fresh))))))
-      (wrap-existentials to-bind
-                         (scoping:to-local condition
-                                           #'s:base-p
-                                           #'rewrite
-                                           :test #'equalp)))))
+  (check-type environment local-condition-environment)
+  (let ((map (lce-map environment)))
+    (labels ((rewrite (expression reference)
+               (check-type expression s:base)
+               (cond ((and (typep reference '(cons (eql c:@-)))
+                           (negative-base-p expression))
+                      ;; Only safe to refer to negative polarity
+                      ;; arguments. negative polarity return values
+                      ;; could come from functions invoked repeatedly.
+                      reference)
+                     (t
+                      ;; make up a new binding that will be made to look like
+                      ;; something bound to this s:base.
+                      (or (ordered:find map expression)
+                          (let ((fresh (c:fresh '#:a)))
+                            (ordered:record map (cons expression fresh))
+                            (push expression (lce-to-process environment))
+                            fresh))))))
+      (scoping:to-local condition
+                        #'s:base-p
+                        #'rewrite
+                        :test #'equalp))))
 
-(defun wrap-existentials (to-bind condition)
-  (check-type to-bind ordered:map)
-  (let ((bindings '())
-        (conditions (list condition)))
-    (loop for (base . gensym) in (ordered:entries to-bind) do
-       ;; nothing prevents a negative value from directly
-       ;; referring to another negative value; perform type
-       ;; dispatch in approximate-local-condition-for-base.
-         (let ((condition (approximate-local-condition-for-base base)))
-           (push `(,gensym ,(flow-info:base-sort *flow-info* base)) bindings)
-           (push (if (c:mentions-v condition)
-                     `(let ((c:v ,gensym))
-                        ,condition)
-                     condition)
-                 conditions)))
-    (if bindings
-        `(c:exists ,(nreverse bindings)
-                   ,(c:and-conditions (nreverse conditions)))
-        condition)))
-
-(defun approximate-local-condition-for-argument (base)
-  (declare (type s:base base))
+(defun approximate-local-condition-for-argument (base environment)
+  (declare (type s:base base)
+           (type local-condition-environment environment))
   (assert (negative-base-p base))
   (let ((location (scoping:reference base :test #'equalp
                                      ;; only safe to use non-toplevel bindings
                                      ;; in pure functions.
                                      :toplevel-only (not *assume-purity*))))
-    ;; it's always safe to directly refer to negative arguments in scope (modulo purity)
+    ;; it's always safe to directly refer to negative arguments in scope
+    ;; (modulo purity)
     (when (typep location '(cons (eql c:@-)))
       (return-from approximate-local-condition-for-argument
         `(= c:v ,location))))
-  (when (and *assume-causality*
-             (not (causality:available-p base)))
-    ;; this base type can't flow into the return type we're currently
-    ;; generating.
-    (return-from approximate-local-condition-for-argument 'c:false))
-  (occur-check:with-occur-check ((base) (return 'c:true))
-    ;; (over)approximate the set of values that may flow into the
-    ;; polymorphic function.
-    (approximate-local-condition (argument-global-condition base))))
+  (if (and *assume-causality*
+           (not (causality:available-p base)))
+      ;; this base type can't flow into the return type we're currently
+      ;; generating.
+      'c:false
+      (localise-one-condition-with-environment
+       (argument-global-condition base) environment)))
 
-(defun approximate-local-condition-for-base (base)
-  (declare (type s:base base))
+(defun approximate-local-condition-for-base (base environment)
+  (declare (type s:base base)
+           (type local-condition-environment environment))
   (cond ((negative-base-p base)
-         (approximate-local-condition-for-argument base))
+         (approximate-local-condition-for-argument base environment))
         (t
          (assert (positive-base-p base))
          ;; the logic here implements the same thing as
@@ -207,20 +233,23 @@
          ;; constraint. At most one of solution or constraint is
          ;; populated for any base, but it's simpler to code as if
          ;; both could be present, with appropriate defaults.
-         (let ((solution (or (contract:solution-or-nil *contract* base)
-                             'c:false))
-               (constraint (contract:constraint *contract* base))
+         (let ((solution (localise-one-condition-with-environment
+                          (or (contract:solution-or-nil *contract* base)
+                              'c:false)
+                          environment))
+               (constraint (localise-one-condition-with-environment
+                            (contract:constraint *contract* base)
+                            environment))
                (flow-in (approximate-local-condition-for-result base)))
-           (approximate-local-condition
-            (c:or-conditions (list solution
-                                   (c:and-conditions (list constraint
-                                                           flow-in)))))))))
+           (c:or-conditions (list solution
+                                  (c:and-conditions (list constraint
+                                                          flow-in))))))))
 
 (defun approximate-local-condition-for-result (base)
   (declare (type s:base base))
   (assert (positive-base-p base))
   (occur-check:with-occur-check ((base) (return 'c:true))
-    (c:or-conditions (mapcar #'approximate-local-condition-for-argument
+    (c:or-conditions (mapcar #'localise-with-environment
                              (flow-info:base-sources *flow-info* base)))))
 
 ;;; The previous section was concerned with funny dataflow
