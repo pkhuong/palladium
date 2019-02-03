@@ -180,7 +180,7 @@
                                      ;; only safe to use non-toplevel bindings
                                      ;; in pure functions.
                                      :toplevel-only (not *assume-purity*))))
-    ;; it's always safe to directly refer to negative arguments in scope.
+    ;; it's always safe to directly refer to negative arguments in scope (modulo purity)
     (when (typep location '(cons (eql c:@-)))
       (return-from approximate-local-condition-for-argument
         `(= c:v ,location))))
@@ -207,16 +207,14 @@
          ;; constraint. At most one of solution or constraint is
          ;; populated for any base, but it's simpler to code as if
          ;; both could be present, with appropriate defaults.
-         (let ((solution (approximate-local-condition
-                          ;; only populated if the sort is known.
-                          (or (contract:solution-or-nil *contract* base)
-                              'c:false)))
-               (constraint (approximate-local-condition
-                            (contract:constraint *contract* base)))
+         (let ((solution (or (contract:solution-or-nil *contract* base)
+                             'c:false))
+               (constraint (contract:constraint *contract* base))
                (flow-in (approximate-local-condition-for-result base)))
-           (c:or-conditions (list solution
-                                  (c:and-conditions (list constraint
-                                                          flow-in))))))))
+           (approximate-local-condition
+            (c:or-conditions (list solution
+                                   (c:and-conditions (list constraint
+                                                           flow-in)))))))))
 
 (defun approximate-local-condition-for-result (base)
   (declare (type s:base base))
